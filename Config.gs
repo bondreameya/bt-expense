@@ -3,7 +3,8 @@ var CONFIG = {
   PROJECT_ID: 'btdata',
   DATASET: 'expenses',
   LOCATION: 'us-central1',
-  SESSION_TTL_SEC: 8 * 60 * 60,      // ~8h (CacheService max is 6h per put; refreshed on use)
+  SESSION_MAX_AGE_SEC: 8 * 60 * 60,  // absolute session lifetime
+  CACHE_TTL_SEC: 6 * 60 * 60,        // CacheService max; refreshed on each use
   MAX_FAILED_ATTEMPTS: 5,
   LOCKOUT_MINUTES: 15,
   HASH_ITERATIONS: 10000,
