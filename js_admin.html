@@ -168,21 +168,62 @@
       api('adminListCategories', [], function (cats) {
         api('adminListCenters', [], function (centers) {
           var active = cats.filter(function (c) { return c.active; });
-          $('adminBody').innerHTML = '<p class="muted small">Only ticked categories appear in the expense form for that center. A center with none ticked cannot record expenses.</p>' +
+          var parents = active.filter(function (c) { return !c.parent_id; });
+          var kids = function (pid) { return active.filter(function (c) { return c.parent_id === pid; }); };
+          var orphans = active.filter(function (c) { return c.parent_id && !parents.some(function (p) { return p.category_id === c.parent_id; }); });
+          var box = function (k, allowed, cls, extra) {
+            return '<label class="' + cls + '"><input type="checkbox" value="' + esc(k.category_id) + '"' + (allowed.indexOf(k.category_id) >= 0 ? ' checked' : '') + (extra || '') + '> ' + esc(k.name) + '</label>';
+          };
+          $('adminBody').innerHTML = '<p class="muted small">Only ticked categories appear in the expense form for that center. Ticking a group ticks all its sub-categories; ' +
+            'you can then untick individual ones. A center with none ticked cannot record expenses.</p>' +
             (active.length ? '' : '<div class="hint">There are no categories yet. Add some in the Categories tab first.</div>') +
-            centers.filter(function (c) { return c.active; }).map(function (c, i) {
-              return '<div class="card"><h3>' + esc(c.center_code + ' — ' + c.name) + ' <span class="muted small">' + c.allowed_categories.length + ' allowed</span></h3><div class="checks" data-center="' + esc(c.center_id) + '">' +
-                active.map(function (k) { return '<label><input type="checkbox" value="' + esc(k.category_id) + '"' + (c.allowed_categories.indexOf(k.category_id) >= 0 ? ' checked' : '') + '> ' +
-                  esc((k.parent_name ? k.parent_name + ' › ' : '') + k.name) + '</label>'; }).join('') +
-                '</div><div class="actions"><button class="btn btn-sm" data-all="' + esc(c.center_id) + '">Tick all</button><button class="btn btn-sm btn-primary" data-save="' + esc(c.center_id) + '">Save</button></div></div>';
+            centers.filter(function (c) { return c.active; }).map(function (c) {
+              var al = c.allowed_categories;
+              return '<div class="card"><h3>' + esc(c.center_code + ' — ' + c.name) + ' <span class="muted small" data-count>' + al.length + ' allowed</span></h3>' +
+                '<div class="cat-tree" data-center="' + esc(c.center_id) + '">' +
+                parents.map(function (p) {
+                  var ch = kids(p.category_id);
+                  return '<div class="cat-group">' + box(p, al, 'cat-parent', ' data-parent="1"') +
+                    (ch.length ? '<div class="checks cat-children">' + ch.map(function (k) { return box(k, al, 'cat-child', ' data-of="' + esc(p.category_id) + '"'); }).join('') + '</div>' : '') + '</div>';
+                }).join('') +
+                (orphans.length ? '<div class="checks">' + orphans.map(function (k) { return box(k, al, ''); }).join('') + '</div>' : '') +
+                '</div><div class="actions"><button class="btn btn-sm" data-all="' + esc(c.center_id) + '">Tick all</button><button class="btn btn-sm" data-none="' + esc(c.center_id) + '">Clear</button>' +
+                '<button class="btn btn-sm btn-primary" data-save="' + esc(c.center_id) + '">Save</button></div></div>';
             }).join('');
           var B = $('adminBody');
-          B.querySelectorAll('[data-all]').forEach(function (b) { b.addEventListener('click', function () {
-            B.querySelectorAll('.checks[data-center="' + b.getAttribute('data-all') + '"] input').forEach(function (x) { x.checked = true; }); }); });
+          var tree = function (id) { return B.querySelector('.cat-tree[data-center="' + id + '"]'); };
+          // Parent state from children: all -> checked, some -> indeterminate, none -> unchecked.
+          var sync = function (t) {
+            t.querySelectorAll('input[data-parent]').forEach(function (p) {
+              var ch = t.querySelectorAll('input[data-of="' + p.value + '"]');
+              if (!ch.length) { p.indeterminate = false; return; }
+              var n = Array.prototype.filter.call(ch, function (x) { return x.checked; }).length;
+              p.checked = n === ch.length; p.indeterminate = n > 0 && n < ch.length;
+            });
+            var cnt = t.parentNode.querySelector('[data-count]');
+            if (cnt) cnt.textContent = selected(t).length + ' allowed';
+          };
+          // Parent ID is saved only when the whole group is ticked (so server-side expansion never re-adds unticked children).
+          var selected = function (t) {
+            return Array.prototype.filter.call(t.querySelectorAll('input[type=checkbox]'), function (x) { return x.checked && !x.indeterminate; }).map(function (x) { return x.value; });
+          };
+          B.querySelectorAll('.cat-tree').forEach(function (t) {
+            sync(t);
+            t.addEventListener('change', function (e) {
+              var x = e.target;
+              if (x.hasAttribute('data-parent')) {
+                x.indeterminate = false;
+                t.querySelectorAll('input[data-of="' + x.value + '"]').forEach(function (c) { c.checked = x.checked; });
+              }
+              sync(t);
+            });
+          });
+          var setAll = function (id, v) { var t = tree(id); t.querySelectorAll('input[type=checkbox]').forEach(function (x) { x.checked = v; x.indeterminate = false; }); sync(t); };
+          B.querySelectorAll('[data-all]').forEach(function (b) { b.addEventListener('click', function () { setAll(b.getAttribute('data-all'), true); }); });
+          B.querySelectorAll('[data-none]').forEach(function (b) { b.addEventListener('click', function () { setAll(b.getAttribute('data-none'), false); }); });
           B.querySelectorAll('[data-save]').forEach(function (b) { b.addEventListener('click', function () {
             var id = b.getAttribute('data-save');
-            var ids = Array.prototype.filter.call(B.querySelectorAll('.checks[data-center="' + id + '"] input'), function (x) { return x.checked; }).map(function (x) { return x.value; });
-            api('adminSetCenterCategories', [id, ids], function () { toast('Saved.', true); self.reloadBoot(); });
+            api('adminSetCenterCategories', [id, selected(tree(id))], function () { toast('Saved.', true); self.reloadBoot(); });
           }); });
         });
       });

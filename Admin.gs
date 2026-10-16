@@ -208,10 +208,13 @@ function adminListCenters(token) {
 
 function adminSetCenterCategories(token, centerId, categoryIds) {
   var sess = admin_(token);
-  categoryIds = (categoryIds || []).filter(String);
+  categoryIds = (categoryIds || []).filter(String).filter(function (x, i, a) { return a.indexOf(x) === i; });
   if (categoryIds.length) {
     var ok = bq('SELECT COUNT(*) AS n FROM ' + T('expense_categories') + ' WHERE category_id IN UNNEST(@c)', { c: SA(categoryIds) })[0].n;
     if (ok !== categoryIds.length) throw new Error('Unknown category selected.');
+    // A ticked parent means "the whole group": add any active children that weren't sent. Stored format stays a plain ID list.
+    bq('SELECT category_id FROM ' + T('expense_categories') + ' WHERE active AND parent_id IN UNNEST(@c) ORDER BY category_id', { c: SA(categoryIds) })
+      .forEach(function (r) { if (categoryIds.indexOf(r.category_id) < 0) categoryIds.push(r.category_id); });
   }
   var old = centerById_(centerId);
   bqDml('UPDATE ' + T('centers') + " SET sys_remarks = JSON_SET(IFNULL(sys_remarks, JSON '{}'), '$.allowed_expense_categories', PARSE_JSON(@a)), updated_at = CURRENT_TIMESTAMP() WHERE center_id = @id",
