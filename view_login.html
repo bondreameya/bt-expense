@@ -1,0 +1,19 @@
+<section id="view-login" class="view card narrow hidden">
+  <h2>Sign in</h2>
+  <form id="loginForm" autocomplete="on">
+    <label>Username<input id="loginUser" name="username" autocomplete="username" required></label>
+    <label>Password<input id="loginPass" type="password" autocomplete="current-password" required></label>
+    <button class="btn btn-primary btn-block" type="submit">Sign in</button>
+  </form>
+</section>
+<section id="view-changepw" class="view card narrow hidden">
+  <h2>Set a new password</h2>
+  <p class="muted">You need to choose a new password before continuing.</p>
+  <form id="changePwForm">
+    <label>Current password<input id="pwOld" type="password" autocomplete="current-password" required></label>
+    <label>New password<input id="pwNew" type="password" autocomplete="new-password" minlength="8" required></label>
+    <label>Confirm new password<input id="pwNew2" type="password" autocomplete="new-password" minlength="8" required></label>
+    <p class="muted small">At least 8 characters, with letters and numbers.</p>
+    <button class="btn btn-primary btn-block" type="submit">Update password</button>
+  </form>
+</section>

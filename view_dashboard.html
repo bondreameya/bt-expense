@@ -1,0 +1,16 @@
+<section id="view-dashboard" class="view hidden">
+  <div class="toolbar">
+    <div class="row">
+      <label class="inline">Center <select id="dashCenter" class="center-select"></select></label>
+      <label class="inline">Month <input type="month" id="dashMonth"></label>
+    </div>
+    <span id="roleBadge" class="badge"></span>
+  </div>
+  <div class="grid">
+    <div class="card stat"><div class="stat-label">Expenses</div><div class="stat-value" id="stExp">—</div><div class="muted small" id="stExpN"></div></div>
+    <div class="card stat"><div class="stat-label">Invoices</div><div class="stat-value" id="stInv">—</div><div class="muted small" id="stInvN"></div></div>
+    <div class="card stat"><div class="stat-label">Receipts</div><div class="stat-value" id="stRcp">—</div><div class="muted small" id="stRcpN"></div></div>
+    <div class="card stat"><div class="stat-label">Not fully matched</div><div class="stat-value" id="stUnm">—</div><div class="muted small" id="stUnmN"></div></div>
+  </div>
+  <div class="card"><h3>Top categories this month</h3><div id="dashCats"></div></div>
+</section>

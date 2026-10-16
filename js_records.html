@@ -1,0 +1,232 @@
+<script>
+  // ---------- Expenses / Invoices / Receipts ----------
+  var Records = {
+    entity: 'expenses', page: 0, rows: [],
+    open: function (entity) {
+      this.entity = entity; this.page = 0;
+      var m = state.boot.meta[entity];
+      $('recTitle').textContent = m.label + 's';
+      if (!$('fTo').value) $('fTo').value = state.boot.today;
+      if (!$('fFrom').value) {
+        var t = state.boot.today, y = +t.slice(0, 4), mo = +t.slice(5, 7);
+        $('fFrom').value = (mo >= 4 ? y : y - 1) + '-04-01';
+      }
+      this.load();
+    },
+    filters: function () {
+      return { entity: this.entity, center_id: $('fCenter').value, from: $('fFrom').value, to: $('fTo').value,
+               vendor_id: $('fVendor').value, status: $('fStatus').value, page: this.page };
+    },
+    load: function () {
+      var self = this, m = state.boot.meta[this.entity];
+      api('listRecords', [this.filters()], function (res) {
+        self.rows = res.rows;
+        $('recSummary').textContent = res.totalCount + ' records · ' + money(res.totalAmount) + ' · ' + res.from + ' to ' + res.to;
+        var cols = self.columns();
+        var html = '<tr><th>ID</th>' + cols.map(function (c) { return '<th' + (c.num ? ' class="num"' : '') + '>' + esc(c.label) + '</th>'; }).join('') + '<th>Status</th></tr>';
+        html += res.rows.map(function (r, i) {
+          return '<tr class="clickable" data-i="' + i + '"><td>' + esc(r.id) + '</td>' + cols.map(function (c) {
+            return '<td' + (c.num ? ' class="num"' : '') + '>' + c.get(r) + '</td>'; }).join('') +
+            '<td>' + (r.status === 'deleted' ? '<span class="tag bad">deleted</span>' : r.has_pending ? '<span class="tag warn">waiting approval</span>' : '<span class="tag ok">active</span>') + '</td></tr>';
+        }).join('');
+        if (!res.rows.length) html += '<tr><td colspan="' + (cols.length + 2) + '" class="muted">Nothing found for these filters.</td></tr>';
+        $('recTable').innerHTML = html;
+        $('recTable').querySelectorAll('tr.clickable').forEach(function (tr) {
+          tr.addEventListener('click', function () { self.edit(self.rows[+tr.getAttribute('data-i')]); });
+        });
+        $('recPage').textContent = 'Page ' + (res.page + 1);
+        $('recPrev').disabled = res.page === 0; $('recNext').disabled = !res.hasMore;
+      });
+    },
+    columns: function () {
+      var e = this.entity, m = state.boot.meta[e];
+      var cols = [{ label: 'Date', get: function (r) { return esc(r[m.dateCol]); } }];
+      if ($('fCenter').value === '') cols.push({ label: 'Center', get: function (r) { return esc(r.center_code); } });
+      if (e === 'expenses') cols.push({ label: 'Category', get: function (r) { return esc(r.category_name); } });
+      if (e === 'invoices') cols.push({ label: 'Invoice no.', get: function (r) { return esc(r.invoice_no); } });
+      cols.push({ label: 'Vendor', get: function (r) { return esc(r.vendor_name); } });
+      if (e === 'expenses') cols.push({ label: 'Mode', get: function (r) { return esc(r.payment_mode); } }, { label: 'Description', get: function (r) { return esc(r.description); } });
+      if (m.hasFile) cols.push({ label: 'File', get: function (r) { return r.file_id ? '📎' : ''; } });
+      cols.push({ label: 'Amount', num: true, get: function (r) { return money(r[m.amountCol]); } });
+      return cols;
+    },
+
+    /** Build the add/edit form from server metadata. */
+    form: function (rec, centerId) {
+      var m = state.boot.meta[this.entity], fields = m.fields, isNew = !rec;
+      var h = '<h2>' + (isNew ? 'Add ' : 'Edit ') + esc(m.label) + (rec ? ' <span class="muted small">' + esc(rec.id) + '</span>' : '') + '</h2>';
+      if (rec && rec.has_pending) h += '<div class="hint">This record already has a change waiting for admin approval.</div>';
+      if (rec && rec.status === 'deleted') h += '<div class="hint">This record is deleted.</div>';
+      if (!isAdmin() && rec) h += '<p class="muted small">Your changes will be sent to an admin for approval.</p>';
+      h += '<form id="recForm" class="form-grid">';
+      h += '<label class="full">Center<select name="__center" ' + (rec ? 'disabled' : '') + '>' + state.boot.centers.map(function (c) {
+        return '<option value="' + esc(c.center_id) + '"' + (c.center_id === centerId ? ' selected' : '') + '>' + esc(c.center_code + ' — ' + c.name) + '</option>'; }).join('') + '</select></label>';
+      Object.keys(fields).forEach(function (k) {
+        var f = fields[k], v = rec ? rec[k] : (f.t === 'd' ? state.boot.today : ''), lab = esc(f.label) + (f.req ? ' *' : '');
+        if (f.file) {
+          h += '<label class="full">' + lab + (rec && rec.file_id ? ' <a href="#" id="viewFile">view current</a>' : '') +
+               '<input type="file" name="__file" accept="application/pdf,image/*"><input type="hidden" name="file_id" value="' + esc(v || '') + '"></label>';
+        } else if (f.lookup === 'vendors') {
+          h += '<label>' + lab + '<select name="' + k + '" data-vendor="1"></select><a href="#" class="small" id="newVendor">+ new vendor</a></label>';
+        } else if (f.lookup === 'categories') {
+          h += '<label>' + lab + '<select name="' + k + '" data-category="1"></select><span class="small muted" id="catHint"></span></label>';
+        } else if (f.options) {
+          h += '<label>' + lab + '<select name="' + k + '"><option value=""></option>' + f.options.map(function (o) {
+            return '<option' + (o === v ? ' selected' : '') + '>' + o + '</option>'; }).join('') + '</select></label>';
+        } else if (f.long) {
+          h += '<label class="full">' + lab + '<textarea name="' + k + '">' + esc(v) + '</textarea></label>';
+        } else {
+          h += '<label>' + lab + '<input name="' + k + '" type="' + (f.t === 'd' ? 'date' : f.t === 'n' ? 'number' : 'text') + '"' +
+            (f.t === 'n' ? ' step="0.01" min="0"' : '') + (f.t === 'd' ? ' max="' + state.boot.today + '"' : '') + ' value="' + esc(v) + '"></label>';
+        }
+      });
+      if (rec && !isAdmin()) h += '<label class="full">Reason for change *<textarea name="__reason"></textarea></label>';
+      h += '</form><div class="actions">';
+      if (rec && rec.status === 'active' && !rec.has_pending) h += '<button class="btn btn-danger" id="recDel">' + (isAdmin() ? 'Delete' : 'Request delete') + '</button>';
+      if (rec && this.entity === 'expenses' && rec.status === 'active') h += '<button class="btn" id="recRecon">Reconcile</button>';
+      h += '<button class="btn" id="recCancel">Cancel</button>';
+      if (!rec || (rec.status === 'active' && !rec.has_pending)) h += '<button class="btn btn-primary" id="recSave">' + (rec ? (isAdmin() ? 'Save' : 'Send for approval') : 'Save') + '</button>';
+      return h + '</div>';
+    },
+    edit: function (rec) { this.showForm(rec, rec ? rec.center_id : ($('fCenter').value || (state.boot.centers[0] || {}).center_id)); },
+    showForm: function (rec, centerId) {
+      var self = this;
+      if (!state.boot.centers.length) { toast('No centers are assigned to you.'); return; }
+      openModal(this.form(rec, centerId));
+      var form = $('recForm');
+      var fill = function () {
+        var cid = form.__center.value, c = centerById(cid);
+        form.querySelectorAll('select[data-vendor]').forEach(function (s) { vendorOptions(s, s.value || (rec ? rec[s.name] : '')); });
+        var cs = form.querySelector('select[data-category]');
+        if (cs) {
+          var cur = cs.value || (rec ? rec.category_id : ''), allowed = (c && c.allowed_categories) || [];
+          cs.innerHTML = '<option value=""></option>';
+          state.boot.categories.filter(function (x) { return allowed.indexOf(x.category_id) >= 0; })
+            .forEach(function (x) { cs.add(new Option(x.parent_id ? categoryName(x.parent_id) + ' › ' + x.name : x.name, x.category_id)); });
+          if (cur && allowed.indexOf(cur) < 0 && rec) cs.add(new Option(categoryName(cur) + ' (no longer allowed)', cur));
+          cs.value = cur;
+          $('catHint').textContent = allowed.length ? '' : (isAdmin() ? 'No categories allowed for this center yet — set them in Admin › Center categories.'
+                                                                    : 'No categories are set up for this center. Ask an admin.');
+        }
+      };
+      fill();
+      form.__center.addEventListener('change', fill);
+      var nv = $('newVendor'); if (nv) nv.addEventListener('click', function (e) { e.preventDefault(); self.quickVendor(fill); });
+      var vf = $('viewFile'); if (vf) vf.addEventListener('click', function (e) { e.preventDefault(); api('getAttachment', [self.entity, rec.id], openBase64); });
+      $('recCancel').addEventListener('click', closeModal);
+      var del = $('recDel'); if (del) del.addEventListener('click', function () { self.remove(rec, form); });
+      var rr = $('recRecon'); if (rr) rr.addEventListener('click', function () { closeModal(); go('reconcile'); Recon.pick(rec.id); });
+      var sv = $('recSave'); if (sv) sv.addEventListener('click', function () { self.save(rec, form); });
+    },
+    collect: function (form) {
+      var fields = state.boot.meta[this.entity].fields, d = {};
+      Object.keys(fields).forEach(function (k) { if (form[k]) d[k] = form[k].value; });
+      return d;
+    },
+    save: function (rec, form) {
+      var self = this, data = this.collect(form), centerId = form.__center.value;
+      var go2 = function () {
+        if (!rec) return api('createRecord', [self.entity, centerId, data], function (r) { closeModal(); toast('Saved as ' + r.id + '.', true); self.load(); });
+        var changes = {};
+        Object.keys(data).forEach(function (k) { if (String(data[k] || '') !== String(rec[k] === null || rec[k] === undefined ? '' : rec[k])) changes[k] = data[k]; });
+        if (!Object.keys(changes).length) { toast('Nothing changed.'); return; }
+        var reason = form.__reason ? form.__reason.value : '';
+        if (!isAdmin() && !reason.trim()) { toast('Please give a reason for the change.'); return; }
+        api('updateRecord', [self.entity, rec.id, changes, reason], function (r) {
+          closeModal(); toast(r.applied ? 'Changes saved.' : 'Change sent to admin for approval.', true); self.load();
+        });
+      };
+      var fileInput = form.__file;
+      if (fileInput && fileInput.files.length) {
+        var dateVal = data[state.boot.meta[this.entity].dateCol] || state.boot.today;
+        readFileBase64(fileInput.files[0], function (f) {
+          api('uploadAttachment', [centerId, dateVal, f], function (up) { data.file_id = up.file_id; go2(); });
+        });
+      } else go2();
+    },
+    remove: function (rec, form) {
+      var self = this, reason = '';
+      if (!isAdmin()) { reason = form.__reason ? form.__reason.value : ''; if (!reason.trim()) { toast('Please give a reason for deleting.'); return; } }
+      if (!confirm(isAdmin() ? 'Delete ' + rec.id + '? It will be marked deleted and unlinked.' : 'Ask an admin to delete ' + rec.id + '?')) return;
+      api('deleteRecord', [this.entity, rec.id, reason], function (r) { closeModal(); toast(r.applied ? 'Deleted.' : 'Delete request sent for approval.', true); self.load(); });
+    },
+    quickVendor: function (after) {
+      var name = prompt('New vendor name'); if (!name) return;
+      api('createVendor', [{ name: name }], function (v) {
+        state.boot.vendors.push({ vendor_id: v.vendor_id, name: v.name });
+        state.boot.vendors.sort(function (a, b) { return a.name.localeCompare(b.name); });
+        fillVendorSelects();
+        var s = document.querySelector('#recForm select[data-vendor]'); if (s) { vendorOptions(s, v.vendor_id); }
+        toast('Vendor added.', true);
+      });
+    }
+  };
+  $('fApply').addEventListener('click', function () { Records.page = 0; Records.load(); });
+  $('recPrev').addEventListener('click', function () { Records.page--; Records.load(); });
+  $('recNext').addEventListener('click', function () { Records.page++; Records.load(); });
+  $('recAddBtn').addEventListener('click', function () { Records.edit(null); });
+
+  // ---------- Reconcile ----------
+  var Recon = {
+    current: null,
+    load: function () {
+      var self = this;
+      api('listUnmatchedExpenses', [$('rcCenter').value], function (rows) {
+        var h = '<tr><th>Expense</th><th>Date</th><th>Vendor</th><th class="num">Amount</th><th>Status</th></tr>';
+        h += rows.map(function (r) {
+          return '<tr class="clickable' + (r.id === self.current ? ' selected' : '') + '" data-id="' + esc(r.id) + '"><td>' + esc(r.id) + '</td><td>' + esc(r.expense_date) + '</td><td>' + esc(r.vendor_name) +
+            '</td><td class="num">' + money(r.amount) + '</td><td>' + statusTag(r.match_status) + '</td></tr>';
+        }).join('') || '<tr><td colspan="5" class="muted">Everything is matched.</td></tr>';
+        $('rcExpenses').innerHTML = h;
+        $('rcExpenses').querySelectorAll('tr.clickable').forEach(function (tr) { tr.addEventListener('click', function () { self.pick(tr.getAttribute('data-id')); }); });
+      });
+    },
+    pick: function (id) {
+      var self = this; this.current = id;
+      api('getReconcileData', [id], function (d) { self.render(d); });
+    },
+    render: function (d) {
+      var x = d.expense, self = this;
+      var h = '<h3>' + esc(x.id) + ' · ' + money(x.amount) + ' ' + statusTag(x.match_status) + '</h3>' +
+        '<p class="muted small">' + esc(x.expense_date) + ' · ' + esc(x.vendor_name || 'No vendor') + ' · ' + esc(x.category_name || '') + (x.description ? ' · ' + esc(x.description) : '') + '</p>' +
+        '<p class="small">Matched to invoices: <b>' + money(x.matched_amount) + '</b> · Receipts: <b>' + money(x.receipt_amount) + '</b> · Outstanding: <b>' + money(x.outstanding_amount) + '</b></p>';
+      if (!x.vendor_id) h += '<div class="hint">This expense has no vendor, so all unmatched documents of the center are shown.</div>';
+      h += '<h3>Linked</h3><table class="tbl"><tr><th>Type</th><th>Document</th><th>Date</th><th class="num">Doc amount</th><th class="num">Allocated</th><th></th></tr>' +
+        (d.links.map(function (l) {
+          return '<tr><td>' + esc(l.kind) + '</td><td>' + esc(l.other_id) + (l.ref ? ' <span class="muted">(' + esc(l.ref) + ')</span>' : '') + '</td><td>' + esc(l.doc_date) +
+            '</td><td class="num">' + money(l.doc_amount) + '</td><td class="num">' + money(l.allocated_amount) +
+            '</td><td><button class="btn btn-sm btn-danger" data-unlink="' + esc(l.kind) + '|' + esc(l.other_id) + '">Unlink</button></td></tr>';
+        }).join('') || '<tr><td colspan="6" class="muted">Nothing linked yet.</td></tr>') + '</table>';
+      var cand = function (title, kind, rows) {
+        return '<h3 style="margin-top:16px">' + title + '</h3><table class="tbl"><tr><th>Document</th><th>Date</th><th class="num">Amount</th><th class="num">Unallocated</th><th>Allocate</th></tr>' +
+          (rows.map(function (r) {
+            var sugg = Math.min(Number(r.outstanding_amount), Number(kind === 'invoice' ? x.amount - x.matched_amount : x.amount - x.receipt_amount));
+            return '<tr><td>' + esc(r.id) + (r.invoice_no ? ' <span class="muted">(' + esc(r.invoice_no) + ')</span>' : '') + '</td><td>' + esc(r.doc_date) +
+              '</td><td class="num">' + money(r.amount) + '</td><td class="num">' + money(r.outstanding_amount) +
+              '</td><td><input type="number" step="0.01" min="0.01" style="width:110px;display:inline-block;margin:0" value="' + Math.max(0, sugg).toFixed(2) +
+              '"> <button class="btn btn-sm btn-primary" data-link="' + kind + '|' + esc(r.id) + '">Link</button></td></tr>';
+          }).join('') || '<tr><td colspan="5" class="muted">None available.</td></tr>') + '</table>';
+      };
+      h += cand('Unmatched invoices', 'invoice', d.invoices) + cand('Unallocated receipts', 'receipt', d.receipts);
+      $('rcDetail').innerHTML = h;
+      $('rcDetail').querySelectorAll('[data-unlink]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var p = b.getAttribute('data-unlink').split('|');
+          if (!confirm('Unlink ' + p[1] + '?')) return;
+          api('unlinkRecord', [p[0], x.id, p[1]], function () { toast('Unlinked.', true); self.pick(x.id); self.load(); });
+        });
+      });
+      $('rcDetail').querySelectorAll('[data-link]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var p = b.getAttribute('data-link').split('|'), amt = b.previousElementSibling.value;
+          api('linkRecord', [p[0], x.id, p[1], amt], function () { toast('Linked.', true); self.pick(x.id); self.load(); });
+        });
+      });
+    }
+  };
+  function statusTag(s) {
+    var cls = s === 'fully_matched' ? 'ok' : s === 'over_matched' ? 'bad' : s === 'partially_matched' ? 'warn' : '';
+    return '<span class="tag ' + cls + '">' + esc(String(s || '').replace('_', ' ')) + '</span>';
+  }
+  $('rcCenter').addEventListener('change', function () { Recon.load(); });
+</script>

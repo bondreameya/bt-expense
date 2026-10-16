@@ -1,80 +1,174 @@
 <script>
-  // Session token lives in sessionStorage (cleared when the tab closes).
-  var state = { token: sessionStorage.getItem('bt_token'), user: null };
+  // ---------- core: session, server calls, helpers ----------
+  var state = { token: sessionStorage.getItem('bt_token'), user: null, boot: null, view: null };
   var $ = function (id) { return document.getElementById(id); };
 
-  function showView(name) {
-    document.querySelectorAll('.view').forEach(function (v) { v.classList.add('hidden'); });
-    $('view-' + name).classList.remove('hidden');
-    $('userbox').classList.toggle('hidden', name === 'login');
-  }
-  function busy(on) { $('loading').classList.toggle('hidden', !on); }
+  function esc(s) { return s === null || s === undefined ? '' : String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function money(n) { return n === null || n === undefined ? '' : '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function busy(on) { busy.n = (busy.n || 0) + (on ? 1 : -1); $('loading').classList.toggle('hidden', busy.n <= 0); }
   function toast(msg, ok) {
     var t = $('toast'); t.textContent = msg; t.className = 'toast' + (ok ? ' ok' : '');
-    clearTimeout(toast._t); toast._t = setTimeout(function () { t.classList.add('hidden'); }, 6000);
+    clearTimeout(toast._t); toast._t = setTimeout(function () { t.classList.add('hidden'); }, 7000);
   }
   function friendly(err) {
-    var m = (err && err.message) || String(err);
+    var m = (err && err.message) || String(err || '');
     if (/SESSION_EXPIRED/.test(m)) return 'Your session has expired. Please sign in again.';
     if (/PASSWORD_CHANGE_REQUIRED/.test(m)) return 'Please set a new password first.';
-    if (/NetworkError|network/i.test(m)) return 'Network problem. Check your connection and try again.';
-    return m.replace(/^Exception:\s*/, '') || 'Something went wrong. Please try again.';
+    if (/NetworkError|network|Failed to fetch/i.test(m)) return 'Network problem. Check your connection and try again.';
+    if (/exceeded maximum execution time/i.test(m)) return 'That took too long. Try a smaller date range.';
+    if (/Service invoked too many times|quota/i.test(m)) return 'The system is busy right now. Please try again in a minute.';
+    if (/BigQuery|GoogleJsonResponseException|Exception: [A-Z][a-z]+ /.test(m) && !/^Error: /.test(m) && m.length > 160)
+      return 'Something went wrong on the server. Please try again.';
+    return m.replace(/^(Exception|Error):\s*/, '') || 'Something went wrong. Please try again.';
   }
 
-  /** Wrapper: every server call goes through here with a failure handler. */
-  function call(fn, args, onOk) {
+  /** Every server call goes through here: adds token, shows spinner, handles failures. */
+  function api(fn, args, onOk, onFail) {
     busy(true);
     google.script.run
-      .withSuccessHandler(function (res) { busy(false); onOk && onOk(res); })
+      .withSuccessHandler(function (res) { busy(false); if (onOk) onOk(res); })
       .withFailureHandler(function (err) {
         busy(false);
         var m = (err && err.message) || '';
         if (/SESSION_EXPIRED/.test(m)) { clearSession(); showView('login'); }
         else if (/PASSWORD_CHANGE_REQUIRED/.test(m)) { showView('changepw'); }
         toast(friendly(err));
-      })[fn].apply(null, args || []);
+        if (onFail) onFail(err);
+      })[fn].apply(null, [state.token].concat(args || []));
+  }
+  /** For calls that take no token (login). */
+  function apiNoAuth(fn, args, onOk) {
+    busy(true);
+    google.script.run.withSuccessHandler(function (r) { busy(false); onOk(r); })
+      .withFailureHandler(function (err) { busy(false); toast(friendly(err)); })[fn].apply(null, args);
   }
 
-  function clearSession() { state.token = null; state.user = null; sessionStorage.removeItem('bt_token'); }
+  function showView(name) {
+    document.querySelectorAll('.view').forEach(function (v) { v.classList.add('hidden'); });
+    $('view-' + name).classList.remove('hidden');
+    var inApp = ['login', 'changepw'].indexOf(name) < 0;
+    $('userbox').classList.toggle('hidden', !inApp);
+    $('nav').classList.toggle('hidden', !inApp);
+  }
+  function clearSession() { state.token = null; state.user = null; state.boot = null; sessionStorage.removeItem('bt_token'); }
+
+  function openModal(html) { $('modalBox').innerHTML = html; $('modal').classList.remove('hidden'); }
+  function closeModal() { $('modal').classList.add('hidden'); $('modalBox').innerHTML = ''; }
+  $('modal').addEventListener('click', function (e) { if (e.target.id === 'modal') closeModal(); });
+
+  function isAdmin() { return state.boot && state.boot.role === 'admin'; }
+  function vendorName(id) { var v = (state.boot.vendors || []).filter(function (x) { return x.vendor_id === id; })[0]; return v ? v.name : (id || ''); }
+  function categoryName(id) { var c = (state.boot.categories || []).filter(function (x) { return x.category_id === id; })[0]; return c ? c.name : (id || ''); }
+  function centerById(id) { return state.boot.centers.filter(function (c) { return c.center_id === id; })[0]; }
+
+  function fillCenterSelects() {
+    document.querySelectorAll('select.center-select').forEach(function (sel) {
+      var cur = sel.value; sel.innerHTML = '';
+      if (state.boot.centers.length > 1) sel.add(new Option('All my centers', ''));
+      state.boot.centers.forEach(function (c) { sel.add(new Option(c.center_code + ' — ' + c.name, c.center_id)); });
+      if (!state.boot.centers.length) sel.add(new Option('No centers assigned', ''));
+      sel.value = cur;
+    });
+  }
+  function vendorOptions(sel, selected, blank) {
+    sel.innerHTML = ''; sel.add(new Option(blank || '— none —', ''));
+    state.boot.vendors.forEach(function (v) { sel.add(new Option(v.name, v.vendor_id)); });
+    sel.value = selected || '';
+  }
+  function fillVendorSelects() {
+    document.querySelectorAll('select.vendor-select').forEach(function (s) { vendorOptions(s, s.value, s.getAttribute('data-blank')); });
+  }
+
+  function loadBootstrap(cb) {
+    api('getBootstrap', [], function (b) {
+      state.boot = b;
+      fillCenterSelects(); fillVendorSelects();
+      document.querySelectorAll('.admin-only').forEach(function (el) { el.classList.toggle('hidden', b.role !== 'admin'); });
+      if (cb) cb();
+    });
+  }
 
   function enter(user) {
     state.user = user;
     $('userName').textContent = user.name + ' (' + user.username + ')';
     if (user.must_change_password) { showView('changepw'); return; }
     $('roleBadge').textContent = user.role === 'admin' ? 'Admin' : 'User';
-    var sel = $('centerSelect'); sel.innerHTML = '';
-    if (user.role === 'admin' && user.centers.length > 1) sel.add(new Option('All centers', ''));
-    user.centers.forEach(function (c) { sel.add(new Option(c.center_code + ' — ' + c.name, c.center_id)); });
-    if (!user.centers.length) sel.add(new Option('No centers assigned', ''));
-    showView('dashboard');
+    loadBootstrap(function () { go('dashboard'); });
   }
 
+  /** Navigation */
+  function go(view, opts) {
+    state.view = view;
+    document.querySelectorAll('#nav a').forEach(function (a) {
+      a.classList.toggle('active', a.getAttribute('data-view') === view && (!opts || !opts.entity || a.getAttribute('data-entity') === opts.entity));
+    });
+    showView(view);
+    if (view === 'dashboard') loadDashboard();
+    if (view === 'records') Records.open(opts.entity);
+    if (view === 'reconcile') Recon.load();
+    if (view === 'admin') Admin.open();
+  }
+  document.querySelectorAll('#nav a').forEach(function (a) {
+    a.addEventListener('click', function () { go(a.getAttribute('data-view'), { entity: a.getAttribute('data-entity') }); });
+  });
+
+  // ---------- login / password ----------
   $('loginForm').addEventListener('submit', function (e) {
     e.preventDefault();
     var u = $('loginUser').value.trim().toLowerCase(), p = $('loginPass').value;
-    call('login', [u, p], function (res) {
+    apiNoAuth('login', [u, p], function (res) {
       $('loginPass').value = '';
       state.token = res.token; sessionStorage.setItem('bt_token', res.token);
       enter(res.user);
     });
   });
-
   $('changePwForm').addEventListener('submit', function (e) {
     e.preventDefault();
     if ($('pwNew').value !== $('pwNew2').value) { toast('The new passwords do not match.'); return; }
-    call('changePassword', [state.token, $('pwOld').value, $('pwNew').value], function (user) {
+    api('changePassword', [$('pwOld').value, $('pwNew').value], function (user) {
       ['pwOld', 'pwNew', 'pwNew2'].forEach(function (id) { $(id).value = ''; });
       toast('Password updated.', true);
       enter(user);
     });
   });
-
   $('logoutBtn').addEventListener('click', function () {
     var t = state.token; clearSession(); showView('login');
     google.script.run.withFailureHandler(function () {}).logout(t);
   });
 
-  // Startup: resume session if we have a token.
-  if (state.token) call('getSessionInfo', [state.token], enter);
-  else showView('login');
+  // ---------- dashboard ----------
+  function loadDashboard() {
+    if (!$('dashMonth').value) $('dashMonth').value = state.boot.today.slice(0, 7);
+    api('getDashboard', [$('dashCenter').value, $('dashMonth').value], function (d) {
+      $('stExp').textContent = money(d.totals.expenses.amt); $('stExpN').textContent = d.totals.expenses.n + ' entries';
+      $('stInv').textContent = money(d.totals.invoices.amt); $('stInvN').textContent = d.totals.invoices.n + ' invoices';
+      $('stRcp').textContent = money(d.totals.receipts.amt); $('stRcpN').textContent = d.totals.receipts.n + ' receipts';
+      $('stUnm').textContent = d.unmatched.exp_unmatched + d.unmatched.inv_unmatched;
+      $('stUnmN').textContent = d.unmatched.exp_unmatched + ' expenses, ' + d.unmatched.inv_unmatched + ' invoices (all dates)' +
+        (d.unmatched.over_matched ? ', ' + d.unmatched.over_matched + ' over-matched' : '');
+      $('dashCats').innerHTML = d.byCategory.length
+        ? '<table class="tbl">' + d.byCategory.map(function (c) { return '<tr><td>' + esc(c.category) + '</td><td class="num">' + money(c.amt) + '</td></tr>'; }).join('') + '</table>'
+        : '<p class="muted">No expenses this month.</p>';
+      var b = $('pendingBadge');
+      if (d.pendingEdits) { b.textContent = d.pendingEdits; b.classList.remove('hidden'); } else b.classList.add('hidden');
+    });
+  }
+  $('dashCenter').addEventListener('change', loadDashboard);
+  $('dashMonth').addEventListener('change', loadDashboard);
+
+  // ---------- file helpers ----------
+  function readFileBase64(file, cb) {
+    if (file.size > 10 * 1024 * 1024) { toast('File is larger than 10 MB.'); return; }
+    var r = new FileReader();
+    r.onload = function () { cb({ name: file.name, mimeType: file.type, base64: String(r.result).split(',')[1] }); };
+    r.onerror = function () { toast('Could not read that file.'); };
+    r.readAsDataURL(file);
+  }
+  function openBase64(f) {
+    var bin = atob(f.base64), arr = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    var url = URL.createObjectURL(new Blob([arr], { type: f.mimeType }));
+    var a = document.createElement('a'); a.href = url; a.target = '_blank'; a.download = f.name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  }
 </script>

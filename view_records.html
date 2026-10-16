@@ -1,0 +1,21 @@
+<section id="view-records" class="view hidden">
+  <div class="toolbar">
+    <h2 id="recTitle">Expenses</h2>
+    <button class="btn btn-primary" id="recAddBtn">+ Add</button>
+  </div>
+  <div class="card filters">
+    <label>Center <select id="fCenter" class="center-select"></select></label>
+    <label>From <input type="date" id="fFrom"></label>
+    <label>To <input type="date" id="fTo"></label>
+    <label>Vendor <select id="fVendor" class="vendor-select" data-blank="All vendors"></select></label>
+    <label>Status
+      <select id="fStatus"><option value="active">Active</option><option value="pending">Waiting approval</option>
+        <option value="deleted">Deleted</option><option value="all">All</option></select></label>
+    <button class="btn" id="fApply">Apply</button>
+  </div>
+  <div class="card">
+    <div class="muted small" id="recSummary"></div>
+    <div class="table-wrap"><table class="tbl" id="recTable"></table></div>
+    <div class="pager"><button class="btn" id="recPrev">‹ Prev</button><span id="recPage"></span><button class="btn" id="recNext">Next ›</button></div>
+  </div>
+</section>

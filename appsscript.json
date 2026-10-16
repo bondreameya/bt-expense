@@ -4,11 +4,19 @@
   "exceptionLogging": "STACKDRIVER",
   "dependencies": {
     "enabledAdvancedServices": [
-      { "userSymbol": "BigQuery", "serviceId": "bigquery", "version": "v2" }
+      {
+        "userSymbol": "BigQuery",
+        "serviceId": "bigquery",
+        "version": "v2"
+      }
     ]
   },
-  "webapp": { "executeAs": "USER_DEPLOYING", "access": "ANYONE" },
+  "webapp": {
+    "executeAs": "USER_DEPLOYING",
+    "access": "ANYONE"
+  },
   "oauthScopes": [
-    "https://www.googleapis.com/auth/bigquery"
+    "https://www.googleapis.com/auth/bigquery",
+    "https://www.googleapis.com/auth/drive.file"
   ]
 }

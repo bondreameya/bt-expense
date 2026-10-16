@@ -8,6 +8,14 @@
 <body>
   <header class="topbar">
     <div class="brand"><?= appTitle ?></div>
+    <nav id="nav" class="nav hidden">
+      <a data-view="dashboard">Dashboard</a>
+      <a data-view="records" data-entity="expenses">Expenses</a>
+      <a data-view="records" data-entity="invoices">Invoices</a>
+      <a data-view="records" data-entity="receipts">Receipts</a>
+      <a data-view="reconcile">Reconcile</a>
+      <a data-view="admin" class="admin-only">Admin <span id="pendingBadge" class="pill hidden"></span></a>
+    </nav>
     <div id="userbox" class="userbox hidden">
       <span id="userName"></span>
       <button class="btn btn-ghost" id="logoutBtn">Log out</button>
@@ -16,50 +24,17 @@
 
   <main>
     <div id="toast" class="toast hidden"></div>
-
-    <!-- Login -->
-    <section id="view-login" class="view card narrow hidden">
-      <h2>Sign in</h2>
-      <form id="loginForm" autocomplete="on">
-        <label>Username<input id="loginUser" name="username" autocomplete="username" required></label>
-        <label>Password<input id="loginPass" type="password" autocomplete="current-password" required></label>
-        <button class="btn btn-primary" type="submit" id="loginBtn">Sign in</button>
-      </form>
-    </section>
-
-    <!-- Forced password change -->
-    <section id="view-changepw" class="view card narrow hidden">
-      <h2>Set a new password</h2>
-      <p class="muted">You need to choose a new password before continuing.</p>
-      <form id="changePwForm">
-        <label>Current password<input id="pwOld" type="password" autocomplete="current-password" required></label>
-        <label>New password<input id="pwNew" type="password" autocomplete="new-password" minlength="8" required></label>
-        <label>Confirm new password<input id="pwNew2" type="password" autocomplete="new-password" minlength="8" required></label>
-        <p class="muted small">At least 8 characters, with letters and numbers.</p>
-        <button class="btn btn-primary" type="submit" id="changePwBtn">Update password</button>
-      </form>
-    </section>
-
-    <!-- Dashboard shell -->
-    <section id="view-dashboard" class="view hidden">
-      <div class="toolbar">
-        <label class="inline">Center
-          <select id="centerSelect"></select>
-        </label>
-        <span id="roleBadge" class="badge"></span>
-      </div>
-      <div class="grid">
-        <div class="card stat"><div class="stat-label">Expenses this month</div><div class="stat-value">—</div></div>
-        <div class="card stat"><div class="stat-label">Invoices this month</div><div class="stat-value">—</div></div>
-        <div class="card stat"><div class="stat-label">Receipts this month</div><div class="stat-value">—</div></div>
-        <div class="card stat"><div class="stat-label">Unmatched items</div><div class="stat-value">—</div></div>
-      </div>
-      <div class="card"><p class="muted">Expense, invoice and receipt screens are coming next.</p></div>
-    </section>
-
+    <?!= include('view_login') ?>
+    <?!= include('view_dashboard') ?>
+    <?!= include('view_records') ?>
+    <?!= include('view_reconcile') ?>
+    <?!= include('view_admin') ?>
+    <div id="modal" class="modal hidden"><div class="modal-box card" id="modalBox"></div></div>
     <div id="loading" class="loading hidden"><div class="spinner"></div></div>
   </main>
 
   <?!= include('js') ?>
+  <?!= include('js_records') ?>
+  <?!= include('js_admin') ?>
 </body>
 </html>

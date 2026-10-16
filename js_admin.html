@@ -1,0 +1,192 @@
+<script>
+  // ---------- Admin ----------
+  var Admin = {
+    tab: 'pending',
+    open: function () { if (!isAdmin()) { go('dashboard'); return; } this.show(this.tab); },
+    show: function (tab) {
+      this.tab = tab;
+      document.querySelectorAll('#adminTabs a').forEach(function (a) { a.classList.toggle('active', a.getAttribute('data-tab') === tab); });
+      $('adminBody').innerHTML = '<p class="muted">Loading…</p>';
+      this[tab]();
+    },
+    reloadBoot: function () { loadBootstrap(); },
+
+    // Pending edits: old vs new side by side
+    pending: function () {
+      var self = this;
+      api('adminListPending', [], function (items) {
+        $('pendingBadge').textContent = items.length; $('pendingBadge').classList.toggle('hidden', !items.length);
+        if (!items.length) { $('adminBody').innerHTML = '<p class="muted">No changes waiting for approval.</p>'; return; }
+        $('adminBody').innerHTML = items.map(function (it, i) {
+          var pe = it.pending, h = '<div class="card"><h3>' + esc(it.label) + ' ' + esc(it.id) + ' <span class="tag ' + (pe.type === 'delete' ? 'bad' : 'warn') + '">' +
+            esc(pe.type) + '</span> <span class="muted small">' + esc(it.center_code) + '</span></h3>' +
+            '<p class="small">Requested by <b>' + esc(pe.requested_by_name || pe.requested_by) + '</b> on ' + esc(new Date(pe.requested_at).toLocaleString('en-IN')) + '<br>Reason: ' + esc(pe.reason) + '</p>';
+          if (pe.type === 'edit') {
+            h += '<table class="tbl diff"><tr><th>Field</th><th>Current</th><th>Proposed</th></tr>' + Object.keys(it.fields).map(function (k) {
+              var ch = k in (pe.changes || {}), cur = it.current[k], nv = ch ? pe.changes[k] : cur;
+              var show = function (v) { return k === 'vendor_id' ? esc(vendorName(v)) : k === 'category_id' ? esc(categoryName(v)) : k === 'file_id' ? (v ? '📎 file' : '') : esc(v); };
+              return '<tr><td>' + esc(it.fields[k].label) + '</td><td' + (ch ? ' class="changed"' : '') + '>' + show(cur) + '</td><td' + (ch ? ' class="new"' : '') + '>' + show(nv) +
+                (k === 'file_id' && ch && nv ? ' <a href="#" data-pfile="' + i + '">preview</a>' : '') + '</td></tr>';
+            }).join('') + '</table>';
+          } else {
+            h += '<p>Delete this record. It will be marked deleted (not erased) and its reconciliation links removed.</p>';
+          }
+          return h + '<div class="actions"><button class="btn btn-danger" data-reject="' + i + '">Reject</button><button class="btn btn-primary" data-approve="' + i + '">Approve</button></div></div>';
+        }).join('');
+        var B = $('adminBody');
+        B.querySelectorAll('[data-approve]').forEach(function (b) { b.addEventListener('click', function () {
+          var it = items[+b.getAttribute('data-approve')];
+          api('adminApprovePending', [it.entity, it.id], function () { toast('Approved.', true); self.pending(); });
+        }); });
+        B.querySelectorAll('[data-reject]').forEach(function (b) { b.addEventListener('click', function () {
+          var it = items[+b.getAttribute('data-reject')], note = prompt('Note for rejecting (optional)'); if (note === null) return;
+          api('adminRejectPending', [it.entity, it.id, note], function () { toast('Rejected.', true); self.pending(); });
+        }); });
+        B.querySelectorAll('[data-pfile]').forEach(function (a) { a.addEventListener('click', function (e) {
+          e.preventDefault(); var it = items[+a.getAttribute('data-pfile')]; api('getPendingAttachment', [it.entity, it.id], openBase64);
+        }); });
+      });
+    },
+
+    // Users
+    users: function () {
+      var self = this;
+      api('adminListCenters', [], function (centers) {
+        self.allCenters = centers;
+        api('adminListUsers', [], function (users) {
+          var code = function (id) { var c = centers.filter(function (x) { return x.center_id === id; })[0]; return c ? c.center_code : id; };
+          $('adminBody').innerHTML = '<div class="actions"><button class="btn btn-primary" id="uAdd">+ New user</button></div>' +
+            '<table class="tbl"><tr><th>Username</th><th>Name</th><th>Role</th><th>Centers</th><th>Status</th><th>Last login</th></tr>' +
+            users.map(function (u, i) {
+              return '<tr class="clickable" data-i="' + i + '"><td>' + esc(u.username) + '</td><td>' + esc(u.name) + '</td><td>' + esc(u.role) + '</td><td>' +
+                (u.role === 'admin' ? '<span class="muted">all</span>' : esc(u.center_ids.map(code).join(', '))) + '</td><td>' +
+                (!u.active ? '<span class="tag bad">inactive</span>' : u.locked ? '<span class="tag bad">locked</span>' : u.must_change_password ? '<span class="tag warn">must change pw</span>' : '<span class="tag ok">active</span>') +
+                '</td><td>' + esc(u.last_login_at ? new Date(u.last_login_at).toLocaleString('en-IN') : '') + '</td></tr>';
+            }).join('') + '</table>';
+          $('uAdd').addEventListener('click', function () { self.userForm(null); });
+          $('adminBody').querySelectorAll('tr.clickable').forEach(function (tr) { tr.addEventListener('click', function () { self.userForm(users[+tr.getAttribute('data-i')]); }); });
+        });
+      });
+    },
+    userForm: function (u) {
+      var self = this, sel = u ? u.center_ids : [];
+      openModal('<h2>' + (u ? 'Edit user ' + esc(u.username) : 'New user') + '</h2><form id="uForm" class="form-grid">' +
+        '<label>Username *<input name="username" value="' + esc(u ? u.username : '') + '"' + (u ? ' disabled' : '') + ' placeholder="e.g. rahulpatil"></label>' +
+        '<label>Name *<input name="name" value="' + esc(u ? u.name : '') + '"></label>' +
+        '<label>Email (optional)<input name="email" type="email" value="' + esc(u ? u.email : '') + '"></label>' +
+        '<label>Role<select name="role"><option value="user">user</option><option value="admin"' + (u && u.role === 'admin' ? ' selected' : '') + '>admin</option></select></label>' +
+        (u ? '<label class="full"><input type="checkbox" name="active" style="width:auto;display:inline"' + (u.active ? ' checked' : '') + '> Active</label>' : '') +
+        '<div class="full"><p class="muted small">Centers (users only see these; admins see all)</p><div class="checks">' + this.allCenters.filter(function (c) { return c.active; }).map(function (c) {
+          return '<label><input type="checkbox" name="center" value="' + esc(c.center_id) + '"' + (sel.indexOf(c.center_id) >= 0 ? ' checked' : '') + '> ' + esc(c.center_code + ' — ' + c.name) + '</label>'; }).join('') +
+        '</div></div></form><div class="actions">' +
+        (u ? '<button class="btn" id="uReset">Reset password</button>' + (u.locked ? '<button class="btn" id="uUnlock">Unlock</button>' : '') : '') +
+        '<button class="btn" id="uCancel">Cancel</button><button class="btn btn-primary" id="uSave">Save</button></div><div id="uTemp"></div>');
+      var f = $('uForm');
+      var data = function () {
+        return { username: f.username.value, name: f.name.value, email: f.email.value, role: f.role.value, active: f.active ? f.active.checked : true,
+                 center_ids: Array.prototype.filter.call(f.querySelectorAll('input[name=center]'), function (x) { return x.checked; }).map(function (x) { return x.value; }) };
+      };
+      var showTemp = function (r) {
+        $('uTemp').innerHTML = '<div class="hint">Temporary password for <b>' + esc(r.username) + '</b>: <code>' + esc(r.temporary_password) +
+          '</code><br>Share it privately. It is shown only once; they must change it at first login.</div>';
+      };
+      $('uCancel').addEventListener('click', closeModal);
+      $('uSave').addEventListener('click', function () {
+        if (u) api('adminUpdateUser', [u.user_id, data()], function () { closeModal(); toast('User updated. Changes apply at their next login.', true); self.users(); });
+        else api('adminCreateUser', [data()], function (r) { showTemp(r); $('uSave').disabled = true; toast('User created.', true); self.users(); });
+      });
+      if (u) {
+        $('uReset').addEventListener('click', function () {
+          if (confirm('Reset password for ' + u.username + '?')) api('resetPassword', [u.username], showTemp);
+        });
+        if ($('uUnlock')) $('uUnlock').addEventListener('click', function () { api('adminUnlockUser', [u.user_id], function () { toast('Unlocked.', true); closeModal(); self.users(); }); });
+      }
+    },
+
+    // Vendors
+    vendors: function () {
+      var self = this;
+      api('adminListVendors', [], function (vs) {
+        $('adminBody').innerHTML = '<div class="actions"><button class="btn btn-primary" id="vAdd">+ New vendor</button></div><table class="tbl"><tr><th>Name</th><th>GSTIN</th><th>Phone</th><th>UPI</th><th>Status</th></tr>' +
+          vs.map(function (v, i) { return '<tr class="clickable" data-i="' + i + '"><td>' + esc(v.name) + '</td><td>' + esc(v.gstin) + '</td><td>' + esc(v.phone) + '</td><td>' + esc(v.upi_id) +
+            '</td><td>' + (v.active ? '<span class="tag ok">active</span>' : '<span class="tag bad">inactive</span>') + '</td></tr>'; }).join('') + '</table>';
+        $('vAdd').addEventListener('click', function () { self.vendorForm(null); });
+        $('adminBody').querySelectorAll('tr.clickable').forEach(function (tr) { tr.addEventListener('click', function () { self.vendorForm(vs[+tr.getAttribute('data-i')]); }); });
+      });
+    },
+    vendorForm: function (v) {
+      var self = this;
+      var F = [['name', 'Name *'], ['gstin', 'GSTIN'], ['pan', 'PAN'], ['phone', 'Phone'], ['email', 'Email'], ['upi_id', 'UPI ID'],
+               ['bank_account_name', 'Bank account name'], ['bank_account_no', 'Bank account no.'], ['bank_ifsc', 'IFSC'], ['address', 'Address']];
+      openModal('<h2>' + (v ? 'Edit vendor' : 'New vendor') + '</h2><form id="vForm" class="form-grid">' + F.map(function (x) {
+        return '<label' + (x[0] === 'address' ? ' class="full"' : '') + '>' + x[1] + '<input name="' + x[0] + '" value="' + esc(v ? v[x[0]] : '') + '"></label>'; }).join('') +
+        (v ? '<label class="full"><input type="checkbox" name="active" style="width:auto;display:inline"' + (v.active ? ' checked' : '') + '> Active</label>' : '') +
+        '</form><div class="actions"><button class="btn" id="vCancel">Cancel</button><button class="btn btn-primary" id="vSave">Save</button></div>');
+      $('vCancel').addEventListener('click', closeModal);
+      $('vSave').addEventListener('click', function () {
+        var f = $('vForm'), d = {}; F.forEach(function (x) { d[x[0]] = f[x[0]].value; }); if (f.active) d.active = f.active.checked;
+        var done = function () { closeModal(); toast('Vendor saved.', true); self.vendors(); self.reloadBoot(); };
+        if (v) api('adminUpdateVendor', [v.vendor_id, d], done); else api('createVendor', [d], done);
+      });
+    },
+
+    // Categories
+    categories: function () {
+      var self = this;
+      api('adminListCategories', [], function (cs) {
+        self.cats = cs;
+        $('adminBody').innerHTML = '<div class="actions"><button class="btn btn-primary" id="cAdd">+ New category</button></div><table class="tbl"><tr><th>Category</th><th>GST</th><th>Status</th></tr>' +
+          cs.map(function (c, i) { return '<tr class="clickable" data-i="' + i + '"><td>' + (c.parent_id ? '<span class="muted">' + esc(c.parent_name) + ' › </span>' : '') + esc(c.name) +
+            '</td><td>' + (c.gst_applicable ? 'yes' : '') + '</td><td>' + (c.active ? '<span class="tag ok">active</span>' : '<span class="tag bad">inactive</span>') + '</td></tr>'; }).join('') + '</table>';
+        $('cAdd').addEventListener('click', function () { self.catForm(null); });
+        $('adminBody').querySelectorAll('tr.clickable').forEach(function (tr) { tr.addEventListener('click', function () { self.catForm(cs[+tr.getAttribute('data-i')]); }); });
+      });
+    },
+    catForm: function (c) {
+      var self = this, parents = this.cats.filter(function (x) { return !x.parent_id && (!c || x.category_id !== c.category_id); });
+      openModal('<h2>' + (c ? 'Edit category' : 'New category') + '</h2><form id="cForm"><label>Name *<input name="name" value="' + esc(c ? c.name : '') + '"></label>' +
+        '<label>Parent (optional)<select name="parent_id"><option value="">— top level —</option>' + parents.map(function (p) {
+          return '<option value="' + esc(p.category_id) + '"' + (c && c.parent_id === p.category_id ? ' selected' : '') + '>' + esc(p.name) + '</option>'; }).join('') + '</select></label>' +
+        '<label><input type="checkbox" name="gst" style="width:auto;display:inline"' + (c && c.gst_applicable ? ' checked' : '') + '> GST applicable</label>' +
+        (c ? '<label><input type="checkbox" name="active" style="width:auto;display:inline"' + (c.active ? ' checked' : '') + '> Active</label>' : '') +
+        '</form><div class="actions"><button class="btn" id="cCancel">Cancel</button><button class="btn btn-primary" id="cSave">Save</button></div>');
+      $('cCancel').addEventListener('click', closeModal);
+      $('cSave').addEventListener('click', function () {
+        var f = $('cForm'), d = { name: f.name.value, parent_id: f.parent_id.value, gst_applicable: f.gst.checked };
+        if (f.active) d.active = f.active.checked;
+        var done = function () { closeModal(); toast('Category saved.', true); self.categories(); self.reloadBoot(); };
+        if (c) api('adminUpdateCategory', [c.category_id, d], done); else api('adminCreateCategory', [d], done);
+      });
+    },
+
+    // Center allowed categories
+    centers: function () {
+      var self = this;
+      api('adminListCategories', [], function (cats) {
+        api('adminListCenters', [], function (centers) {
+          var active = cats.filter(function (c) { return c.active; });
+          $('adminBody').innerHTML = '<p class="muted small">Only ticked categories appear in the expense form for that center. A center with none ticked cannot record expenses.</p>' +
+            (active.length ? '' : '<div class="hint">There are no categories yet. Add some in the Categories tab first.</div>') +
+            centers.filter(function (c) { return c.active; }).map(function (c, i) {
+              return '<div class="card"><h3>' + esc(c.center_code + ' — ' + c.name) + ' <span class="muted small">' + c.allowed_categories.length + ' allowed</span></h3><div class="checks" data-center="' + esc(c.center_id) + '">' +
+                active.map(function (k) { return '<label><input type="checkbox" value="' + esc(k.category_id) + '"' + (c.allowed_categories.indexOf(k.category_id) >= 0 ? ' checked' : '') + '> ' +
+                  esc((k.parent_name ? k.parent_name + ' › ' : '') + k.name) + '</label>'; }).join('') +
+                '</div><div class="actions"><button class="btn btn-sm" data-all="' + esc(c.center_id) + '">Tick all</button><button class="btn btn-sm btn-primary" data-save="' + esc(c.center_id) + '">Save</button></div></div>';
+            }).join('');
+          var B = $('adminBody');
+          B.querySelectorAll('[data-all]').forEach(function (b) { b.addEventListener('click', function () {
+            B.querySelectorAll('.checks[data-center="' + b.getAttribute('data-all') + '"] input').forEach(function (x) { x.checked = true; }); }); });
+          B.querySelectorAll('[data-save]').forEach(function (b) { b.addEventListener('click', function () {
+            var id = b.getAttribute('data-save');
+            var ids = Array.prototype.filter.call(B.querySelectorAll('.checks[data-center="' + id + '"] input'), function (x) { return x.checked; }).map(function (x) { return x.value; });
+            api('adminSetCenterCategories', [id, ids], function () { toast('Saved.', true); self.reloadBoot(); });
+          }); });
+        });
+      });
+    }
+  };
+  document.querySelectorAll('#adminTabs a').forEach(function (a) { a.addEventListener('click', function () { Admin.show(a.getAttribute('data-tab')); }); });
+
+  // ---------- startup ----------
+  if (state.token) api('getSessionInfo', [], enter); else showView('login');
+</script>
