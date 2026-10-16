@@ -107,7 +107,7 @@
     $('userbox').classList.toggle('hidden', !inApp);
     $('nav').classList.toggle('hidden', !inApp);
   }
-  function clearSession() { state.token = null; state.user = null; state.boot = null; sessionStorage.removeItem('bt_token'); }
+  function clearSession() { state.token = null; state.user = null; state.boot = null; sessionStorage.removeItem('bt_token'); sessionStorage.removeItem('bt_center'); }
 
   function openModal(html) { $('modalBox').innerHTML = html; $('modal').classList.remove('hidden'); }
   function closeModal() { $('modal').classList.add('hidden'); $('modalBox').innerHTML = ''; }
@@ -142,13 +142,32 @@
   function categoryName(id) { var c = (state.boot.categories || []).filter(function (x) { return x.category_id === id; })[0]; return c ? c.name : (id || ''); }
   function centerById(id) { return state.boot.centers.filter(function (c) { return c.center_id === id; })[0]; }
 
+  // ---------- center defaulting (central) ----------
+  // Preferred center = last one the user picked this session (if still theirs), else the first real center A-Z.
+  // '' ("All my centers") is only used when the user explicitly picked it.
+  function sortedCenters() { return sortAZ((state.boot && state.boot.centers) || [], 'name'); }
+  function preferredCenter() {
+    var list = sortedCenters(), saved = sessionStorage.getItem('bt_center');
+    if (saved !== null && (saved === '' ? list.length > 1 : list.some(function (c) { return c.center_id === saved; }))) return saved;
+    return list.length ? list[0].center_id : '';
+  }
+  function rememberCenter(id) { sessionStorage.setItem('bt_center', id || ''); }
   function fillCenterSelects() {
+    var pref = preferredCenter();
     document.querySelectorAll('select.center-select').forEach(function (sel) {
-      var cur = sel.value; sel.innerHTML = '';
-      if (state.boot.centers.length > 1) sel.add(new Option('All my centers', ''));
-      sortAZ(state.boot.centers, 'name').forEach(function (c) { sel.add(new Option(centerLabel(c), c.center_id)); });
-      if (!state.boot.centers.length) sel.add(new Option('No centers assigned', ''));
-      sel.value = cur;
+      sel.innerHTML = '';
+      var list = sortedCenters();
+      if (list.length > 1) sel.add(new Option('All my centers', ''));
+      list.forEach(function (c) { sel.add(new Option(centerLabel(c), c.center_id)); });
+      if (!list.length) sel.add(new Option('No centers assigned', ''));
+      sel.value = pref;
+      if (!sel._centerBound) {   // remember the choice and keep every tab in step
+        sel._centerBound = true;
+        sel.addEventListener('change', function () {
+          rememberCenter(sel.value);
+          document.querySelectorAll('select.center-select').forEach(function (o) { if (o !== sel) o.value = sel.value; });
+        }, true);
+      }
     });
   }
   function vendorOptions(sel, selected, blank) {

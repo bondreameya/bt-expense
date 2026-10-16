@@ -88,7 +88,7 @@
       if (!rec || (rec.status === 'active' && !rec.has_pending)) h += '<button class="btn btn-primary" id="recSave">' + (rec ? (isAdmin() ? 'Save' : 'Send for approval') : 'Save') + '</button>';
       return h + '</div>';
     },
-    edit: function (rec) { this.showForm(rec, rec ? rec.center_id : ($('fCenter').value || (state.boot.centers[0] || {}).center_id)); },
+    edit: function (rec) { this.showForm(rec, rec ? rec.center_id : ($('fCenter').value || preferredCenter() || (sortedCenters()[0] || {}).center_id)); },
     showForm: function (rec, centerId) {
       var self = this;
       if (!state.boot.centers.length) { toast('No centers are assigned to you.'); return; }
