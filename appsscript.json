@@ -1,7 +1,14 @@
 {
-  "timeZone": "America/New_York",
-  "dependencies": {
-  },
+  "timeZone": "Asia/Kolkata",
+  "runtimeVersion": "V8",
   "exceptionLogging": "STACKDRIVER",
-  "runtimeVersion": "V8"
+  "dependencies": {
+    "enabledAdvancedServices": [
+      { "userSymbol": "BigQuery", "serviceId": "bigquery", "version": "v2" }
+    ]
+  },
+  "webapp": { "executeAs": "USER_DEPLOYING", "access": "ANYONE" },
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/bigquery"
+  ]
 }
