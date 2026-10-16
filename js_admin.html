@@ -74,10 +74,11 @@
         '<label>Username *<input name="username" value="' + esc(u ? u.username : '') + '"' + (u ? ' disabled' : '') + ' placeholder="e.g. rahulpatil"></label>' +
         '<label>Name *<input name="name" value="' + esc(u ? u.name : '') + '"></label>' +
         '<label>Email (optional)<input name="email" type="email" value="' + esc(u ? u.email : '') + '"></label>' +
-        '<label>Role<select name="role"><option value="user">user</option><option value="admin"' + (u && u.role === 'admin' ? ' selected' : '') + '>admin</option></select></label>' +
+        '<label>Role<select name="role">' + sortAZ(['admin', 'user']).map(function (r) {
+          return '<option value="' + r + '"' + ((u ? u.role : 'user') === r ? ' selected' : '') + '>' + r + '</option>'; }).join('') + '</select></label>' +
         (u ? '<label class="full"><input type="checkbox" name="active" style="width:auto;display:inline"' + (u.active ? ' checked' : '') + '> Active</label>' : '') +
-        '<div class="full"><p class="muted small">Centers (users only see these; admins see all)</p><div class="checks">' + this.allCenters.filter(function (c) { return c.active; }).map(function (c) {
-          return '<label><input type="checkbox" name="center" value="' + esc(c.center_id) + '"' + (sel.indexOf(c.center_id) >= 0 ? ' checked' : '') + '> ' + esc(c.center_code + ' — ' + c.name) + '</label>'; }).join('') +
+        '<div class="full"><p class="muted small">Centers (users only see these; admins see all)</p><div class="checks">' + sortAZ(this.allCenters.filter(function (c) { return c.active; }), 'name').map(function (c) {
+          return '<label><input type="checkbox" name="center" value="' + esc(c.center_id) + '"' + (sel.indexOf(c.center_id) >= 0 ? ' checked' : '') + '> ' + esc(centerLabel(c)) + '</label>'; }).join('') +
         '</div></div></form><div class="actions">' +
         (u ? '<button class="btn" id="uReset">Reset password</button>' + (u.locked ? '<button class="btn" id="uUnlock">Unlock</button>' : '') : '') +
         '<button class="btn" id="uCancel">Cancel</button><button class="btn btn-primary" id="uSave">Save</button></div><div id="uTemp"></div>');
@@ -146,7 +147,7 @@
       });
     },
     catForm: function (c) {
-      var self = this, parents = this.cats.filter(function (x) { return !x.parent_id && (!c || x.category_id !== c.category_id); });
+      var self = this, parents = sortAZ(this.cats.filter(function (x) { return !x.parent_id && x.active && (!c || x.category_id !== c.category_id); }), 'name');
       openModal('<h2>' + (c ? 'Edit category' : 'New category') + '</h2><form id="cForm"><label>Name *<input name="name" value="' + esc(c ? c.name : '') + '"></label>' +
         '<label>Parent (optional)<select name="parent_id"><option value="">— top level —</option>' + parents.map(function (p) {
           return '<option value="' + esc(p.category_id) + '"' + (c && c.parent_id === p.category_id ? ' selected' : '') + '>' + esc(p.name) + '</option>'; }).join('') + '</select></label>' +
@@ -168,18 +169,17 @@
       api('adminListCategories', [], function (cats) {
         api('adminListCenters', [], function (centers) {
           var active = cats.filter(function (c) { return c.active; });
-          var parents = active.filter(function (c) { return !c.parent_id; });
-          var kids = function (pid) { return active.filter(function (c) { return c.parent_id === pid; }); };
-          var orphans = active.filter(function (c) { return c.parent_id && !parents.some(function (p) { return p.category_id === c.parent_id; }); });
+          var cg = categoryGroups(active), parents = cg.groups.map(function (g) { return g.parent; }), orphans = cg.orphans;
+          var kids = function (pid) { return cg.groups.filter(function (g) { return g.parent.category_id === pid; })[0].children; };
           var box = function (k, allowed, cls, extra) {
             return '<label class="' + cls + '"><input type="checkbox" value="' + esc(k.category_id) + '"' + (allowed.indexOf(k.category_id) >= 0 ? ' checked' : '') + (extra || '') + '> ' + esc(k.name) + '</label>';
           };
           $('adminBody').innerHTML = '<p class="muted small">Only ticked categories appear in the expense form for that center. Ticking a group ticks all its sub-categories; ' +
             'you can then untick individual ones. A center with none ticked cannot record expenses.</p>' +
             (active.length ? '' : '<div class="hint">There are no categories yet. Add some in the Categories tab first.</div>') +
-            centers.filter(function (c) { return c.active; }).map(function (c) {
+            sortAZ(centers.filter(function (c) { return c.active; }), 'name').map(function (c) {
               var al = c.allowed_categories;
-              return '<div class="card"><h3>' + esc(c.center_code + ' — ' + c.name) + ' <span class="muted small" data-count>' + al.length + ' allowed</span></h3>' +
+              return '<div class="card"><h3>' + esc(centerLabel(c)) + ' <span class="muted small" data-count>' + al.length + ' allowed</span></h3>' +
                 '<div class="cat-tree" data-center="' + esc(c.center_id) + '">' +
                 parents.map(function (p) {
                   var ch = kids(p.category_id);

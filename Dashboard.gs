@@ -3,10 +3,10 @@
 function getBootstrap(token) {
   var sess = requireSession(token);
   var centers = bq('SELECT center_id, center_code, name, TO_JSON_STRING(JSON_QUERY(sys_remarks, \'$.allowed_expense_categories\')) AS allowed FROM ' +
-    T('centers') + ' WHERE center_id IN UNNEST(@c) ORDER BY center_code', { c: SA(sess.center_ids) });
+    T('centers') + ' WHERE center_id IN UNNEST(@c) ORDER BY LOWER(name)', { c: SA(sess.center_ids) });
   centers.forEach(function (c) { c.allowed_categories = c.allowed ? (JSON.parse(c.allowed) || []) : []; delete c.allowed; });
-  var vendors = bq('SELECT vendor_id, name FROM ' + T('vendors') + ' WHERE active ORDER BY name');
-  var categories = bq('SELECT category_id, name, parent_id FROM ' + T('expense_categories') + ' WHERE active ORDER BY name');
+  var vendors = bq('SELECT vendor_id, name FROM ' + T('vendors') + ' WHERE active ORDER BY LOWER(name)');
+  var categories = bq('SELECT category_id, name, parent_id FROM ' + T('expense_categories') + ' WHERE active ORDER BY LOWER(name)');
   var meta = {};
   Object.keys(ENTITIES).forEach(function (k) {
     var e = ENTITIES[k];

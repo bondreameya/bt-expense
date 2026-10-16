@@ -59,8 +59,8 @@
       if (rec && rec.status === 'deleted') h += '<div class="hint">This record is deleted.</div>';
       if (!isAdmin() && rec) h += '<p class="muted small">Your changes will be sent to an admin for approval.</p>';
       h += '<form id="recForm" class="form-grid">';
-      h += '<label class="full">Center<select name="__center" ' + (rec ? 'disabled' : '') + '>' + state.boot.centers.map(function (c) {
-        return '<option value="' + esc(c.center_id) + '"' + (c.center_id === centerId ? ' selected' : '') + '>' + esc(c.center_code + ' — ' + c.name) + '</option>'; }).join('') + '</select></label>';
+      h += '<label class="full">Center<select name="__center" ' + (rec ? 'disabled' : '') + '>' + sortAZ(state.boot.centers, 'name').map(function (c) {
+        return '<option value="' + esc(c.center_id) + '"' + (c.center_id === centerId ? ' selected' : '') + '>' + esc(centerLabel(c)) + '</option>'; }).join('') + '</select></label>';
       Object.keys(fields).forEach(function (k) {
         var f = fields[k], v = rec ? rec[k] : (f.t === 'd' ? state.boot.today : ''), lab = esc(f.label) + (f.req ? ' *' : '');
         if (f.file) {
@@ -71,7 +71,7 @@
         } else if (f.lookup === 'categories') {
           h += '<label>' + lab + '<select name="' + k + '" data-category="1"></select><span class="small muted" id="catHint"></span></label>';
         } else if (f.options) {
-          h += '<label>' + lab + '<select name="' + k + '"><option value=""></option>' + f.options.map(function (o) {
+          h += '<label>' + lab + '<select name="' + k + '"><option value=""></option>' + sortAZ(f.options).map(function (o) {
             return '<option' + (o === v ? ' selected' : '') + '>' + o + '</option>'; }).join('') + '</select></label>';
         } else if (f.long) {
           h += '<label class="full">' + lab + '<textarea name="' + k + '">' + esc(v) + '</textarea></label>';
@@ -103,8 +103,17 @@
         if (cs) {
           var cur = cs.value || (rec ? rec.category_id : ''), allowed = (c && c.allowed_categories) || [];
           cs.innerHTML = '<option value=""></option>';
-          state.boot.categories.filter(function (x) { return allowed.indexOf(x.category_id) >= 0; })
-            .forEach(function (x) { cs.add(new Option(x.parent_id ? categoryName(x.parent_id) + ' › ' + x.name : x.name, x.category_id)); });
+          // Grouped by parent (optgroup), parents A-Z, children A-Z; a parent that is itself allowed is the group's first option.
+          var cg = categoryGroups(state.boot.categories), ok = function (x) { return allowed.indexOf(x.category_id) >= 0; };
+          cg.groups.forEach(function (g) {
+            var kids = g.children.filter(ok);
+            if (!kids.length) { if (ok(g.parent)) cs.add(new Option(g.parent.name, g.parent.category_id)); return; }
+            var og = document.createElement('optgroup'); og.label = g.parent.name;
+            if (ok(g.parent)) og.appendChild(new Option(g.parent.name + ' (general)', g.parent.category_id));
+            kids.forEach(function (x) { og.appendChild(new Option(x.name, x.category_id)); });
+            cs.appendChild(og);
+          });
+          cg.orphans.filter(ok).forEach(function (x) { cs.add(new Option(x.name, x.category_id)); });
           if (cur && allowed.indexOf(cur) < 0 && rec) cs.add(new Option(categoryName(cur) + ' (no longer allowed)', cur));
           cs.value = cur;
           $('catHint').textContent = allowed.length ? '' : (isAdmin() ? 'No categories allowed for this center yet — set them in Admin › Center categories.'

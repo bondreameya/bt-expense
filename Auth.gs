@@ -96,7 +96,7 @@ function requireSession(token, opts) {
 
 function publicSession_(sess) {
   var centers = sess.center_ids.length
-    ? bq('SELECT center_id, center_code, name FROM ' + T('centers') + ' WHERE center_id IN UNNEST(@ids) ORDER BY center_code',
+    ? bq('SELECT center_id, center_code, name FROM ' + T('centers') + ' WHERE center_id IN UNNEST(@ids) ORDER BY LOWER(name)',
          { ids: { type: 'STRING', value: sess.center_ids } })
     : [];
   return { username: sess.username, name: sess.name, role: sess.role,

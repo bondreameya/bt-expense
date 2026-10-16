@@ -113,6 +113,30 @@
   function closeModal() { $('modal').classList.add('hidden'); $('modalBox').innerHTML = ''; }
   $('modal').addEventListener('click', function (e) { if (e.target.id === 'modal') closeModal(); });
 
+  // ---------- central sorting for every dropdown / checklist ----------
+  var SORT_LAST = ['miscellaneous', 'other', 'others'];
+  /** Case-insensitive A-Z by key; 'Miscellaneous' / 'Other' sink to the end of their list. Returns a new array. */
+  function sortAZ(arr, key) {
+    var k = typeof key === 'function' ? key : function (x) { return key ? x[key] : x; };
+    return (arr || []).slice().sort(function (a, b) {
+      var A = String(k(a) || '').trim(), B = String(k(b) || '').trim();
+      var la = SORT_LAST.indexOf(A.toLowerCase()) >= 0, lb = SORT_LAST.indexOf(B.toLowerCase()) >= 0;
+      if (la !== lb) return la ? 1 : -1;
+      return A.localeCompare(B, 'en', { sensitivity: 'base', numeric: true });
+    });
+  }
+  function centerLabel(c) { return c.name + ' (' + c.center_code + ')'; }
+  /** Categories grouped: [{parent, children:[...]}], parents A-Z, children A-Z within each parent. */
+  function categoryGroups(cats) {
+    var parents = sortAZ(cats.filter(function (c) { return !c.parent_id; }), 'name');
+    var groups = parents.map(function (p) {
+      return { parent: p, children: sortAZ(cats.filter(function (c) { return c.parent_id === p.category_id; }), 'name') };
+    });
+    var known = parents.map(function (p) { return p.category_id; });
+    var orphans = sortAZ(cats.filter(function (c) { return c.parent_id && known.indexOf(c.parent_id) < 0; }), 'name');
+    return { groups: groups, orphans: orphans };
+  }
+
   function isAdmin() { return state.boot && state.boot.role === 'admin'; }
   function vendorName(id) { var v = (state.boot.vendors || []).filter(function (x) { return x.vendor_id === id; })[0]; return v ? v.name : (id || ''); }
   function categoryName(id) { var c = (state.boot.categories || []).filter(function (x) { return x.category_id === id; })[0]; return c ? c.name : (id || ''); }
@@ -122,14 +146,14 @@
     document.querySelectorAll('select.center-select').forEach(function (sel) {
       var cur = sel.value; sel.innerHTML = '';
       if (state.boot.centers.length > 1) sel.add(new Option('All my centers', ''));
-      state.boot.centers.forEach(function (c) { sel.add(new Option(c.center_code + ' — ' + c.name, c.center_id)); });
+      sortAZ(state.boot.centers, 'name').forEach(function (c) { sel.add(new Option(centerLabel(c), c.center_id)); });
       if (!state.boot.centers.length) sel.add(new Option('No centers assigned', ''));
       sel.value = cur;
     });
   }
   function vendorOptions(sel, selected, blank) {
     sel.innerHTML = ''; sel.add(new Option(blank || '— none —', ''));
-    state.boot.vendors.forEach(function (v) { sel.add(new Option(v.name, v.vendor_id)); });
+    sortAZ(state.boot.vendors, 'name').forEach(function (v) { sel.add(new Option(v.name, v.vendor_id)); });
     sel.value = selected || '';
   }
   function fillVendorSelects() {

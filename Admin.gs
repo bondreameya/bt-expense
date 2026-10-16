@@ -11,7 +11,7 @@ function adminListUsers(token) {
     'ARRAY_AGG(uc.center_id IGNORE NULLS ORDER BY uc.center_id) AS center_ids FROM ' + T('users') + ' u LEFT JOIN ' +
     T('user_centers') + ' uc ON uc.user_id = u.user_id AND uc.active ' +
     'GROUP BY u.user_id, u.username, u.name, u.email, u.role, u.active, must_change_password, locked, u.last_login_at ' +
-    'ORDER BY u.active DESC, u.username');
+    'ORDER BY u.active DESC, LOWER(u.username)');
 }
 
 function tempPassword_() {
@@ -106,7 +106,7 @@ var VENDOR_FIELDS = ['name', 'gstin', 'pan', 'phone', 'email', 'address', 'bank_
 
 function adminListVendors(token) {
   admin_(token);
-  return bq('SELECT vendor_id, ' + VENDOR_FIELDS.join(', ') + ', active FROM ' + T('vendors') + ' ORDER BY active DESC, name');
+  return bq('SELECT vendor_id, ' + VENDOR_FIELDS.join(', ') + ', active FROM ' + T('vendors') + ' ORDER BY active DESC, LOWER(name)');
 }
 
 function cleanVendor_(v) {
@@ -157,7 +157,7 @@ function adminUpdateVendor(token, vendorId, v) {
 function adminListCategories(token) {
   admin_(token);
   return bq('SELECT c.category_id, c.name, c.parent_id, p.name AS parent_name, c.gst_applicable, c.active FROM ' + T('expense_categories') +
-    ' c LEFT JOIN ' + T('expense_categories') + ' p ON p.category_id = c.parent_id ORDER BY c.active DESC, IFNULL(p.name, c.name), c.parent_id IS NOT NULL, c.name');
+    ' c LEFT JOIN ' + T('expense_categories') + ' p ON p.category_id = c.parent_id ORDER BY c.active DESC, LOWER(IFNULL(p.name, c.name)), c.parent_id IS NOT NULL, LOWER(c.name)');
 }
 
 function checkParent_(parentId, selfId) {
@@ -201,7 +201,7 @@ function adminUpdateCategory(token, categoryId, c) {
 function adminListCenters(token) {
   admin_(token);
   var rows = bq('SELECT center_id, center_code, name, active, TO_JSON_STRING(JSON_QUERY(sys_remarks, \'$.allowed_expense_categories\')) AS allowed FROM ' +
-    T('centers') + ' ORDER BY center_code');
+    T('centers') + ' ORDER BY LOWER(name)');
   rows.forEach(function (r) { r.allowed_categories = r.allowed ? (JSON.parse(r.allowed) || []) : []; delete r.allowed; });
   return rows;
 }
