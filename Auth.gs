@@ -45,7 +45,7 @@ function normUsername_(u) {
 function logLogin_(username, userId, result, reason) {
   try {
     bqDml('INSERT INTO ' + T('login_log') +
-      ' (log_id, email, user_id, result, reason, logged_at) VALUES (@id, @login, @uid, @res, @reason, CURRENT_TIMESTAMP())',
+      ' (log_id, username, user_id, result, reason, logged_at) VALUES (@id, @login, @uid, @res, @reason, CURRENT_TIMESTAMP())',
       { id: Utilities.getUuid(), login: username || '(blank)', uid: { type: 'STRING', value: userId || null },
         res: result, reason: { type: 'STRING', value: reason || null } });
   } catch (e) { console.error('login_log failed: ' + e); }
