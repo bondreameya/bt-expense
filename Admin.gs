@@ -252,7 +252,8 @@ function adminApprovePending(token, entity, id) {
       validateRefs_(e, r.center_id, refs);
       applyChanges_(e, r, clean, sess.user_id, 'approve_edit');
     }
-    writeAudit_(e.table, id, 'approve_' + pe.type, null, { requested_by: pe.requested_by, reason: pe.reason }, sess.user_id);
+    // Edits are audited by applyChanges_ (old/new values); this row records who asked and why.
+    writeAudit_(e.table, id, 'approve_' + pe.type + '_request', null, { requested_by: pe.requested_by, reason: pe.reason }, sess.user_id);
     return true;
   });
 }
