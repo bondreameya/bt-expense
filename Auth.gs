@@ -207,6 +207,8 @@ function resetPassword(token, username) {
  * Creates an admin with must_change_password = true, maps to all active centers, deletes the property.
  */
 function createFirstAdmin(username, name) {
+  username = username || 'ameyabondre';
+  name = name || 'Ameya Bondre';
   var props = PropertiesService.getScriptProperties();
   var pw = props.getProperty('BOOTSTRAP_PASSWORD');
   if (!pw) throw new Error('Set Script Property BOOTSTRAP_PASSWORD first.');
