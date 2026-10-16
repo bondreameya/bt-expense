@@ -5,10 +5,13 @@ function admin_(token) { return requireSession(token, { admin: true }); }
 // ---------- users ----------
 function adminListUsers(token) {
   admin_(token);
-  return bq('SELECT u.user_id, u.username, u.name, u.email, u.role, u.active, u.must_change_password, ' +
+  // Center list via LEFT JOIN + ARRAY_AGG (BigQuery rejects correlated ARRAY subqueries on another table).
+  return bq('SELECT u.user_id, u.username, u.name, u.email, u.role, u.active, IFNULL(u.must_change_password, FALSE) AS must_change_password, ' +
     '(u.locked_until IS NOT NULL AND u.locked_until > CURRENT_TIMESTAMP()) AS locked, u.last_login_at, ' +
-    'ARRAY(SELECT uc.center_id FROM ' + T('user_centers') + ' uc WHERE uc.user_id = u.user_id AND uc.active ORDER BY uc.center_id) AS center_ids FROM ' +
-    T('users') + ' u ORDER BY u.active DESC, u.username');
+    'ARRAY_AGG(uc.center_id IGNORE NULLS ORDER BY uc.center_id) AS center_ids FROM ' + T('users') + ' u LEFT JOIN ' +
+    T('user_centers') + ' uc ON uc.user_id = u.user_id AND uc.active ' +
+    'GROUP BY u.user_id, u.username, u.name, u.email, u.role, u.active, must_change_password, locked, u.last_login_at ' +
+    'ORDER BY u.active DESC, u.username');
 }
 
 function tempPassword_() {

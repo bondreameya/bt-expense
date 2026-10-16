@@ -30,6 +30,7 @@
       .withFailureHandler(function (err) {
         busy(false);
         var m = (err && err.message) || '';
+        console.error('Server call ' + fn + ' failed:', m);  // TEMP: surface real server errors
         if (/SESSION_EXPIRED/.test(m)) { clearSession(); showView('login'); }
         else if (/PASSWORD_CHANGE_REQUIRED/.test(m)) { showView('changepw'); }
         toast(friendly(err));
