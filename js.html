@@ -1,0 +1,80 @@
+<script>
+  // Session token lives in sessionStorage (cleared when the tab closes).
+  var state = { token: sessionStorage.getItem('bt_token'), user: null };
+  var $ = function (id) { return document.getElementById(id); };
+
+  function showView(name) {
+    document.querySelectorAll('.view').forEach(function (v) { v.classList.add('hidden'); });
+    $('view-' + name).classList.remove('hidden');
+    $('userbox').classList.toggle('hidden', name === 'login');
+  }
+  function busy(on) { $('loading').classList.toggle('hidden', !on); }
+  function toast(msg, ok) {
+    var t = $('toast'); t.textContent = msg; t.className = 'toast' + (ok ? ' ok' : '');
+    clearTimeout(toast._t); toast._t = setTimeout(function () { t.classList.add('hidden'); }, 6000);
+  }
+  function friendly(err) {
+    var m = (err && err.message) || String(err);
+    if (/SESSION_EXPIRED/.test(m)) return 'Your session has expired. Please sign in again.';
+    if (/PASSWORD_CHANGE_REQUIRED/.test(m)) return 'Please set a new password first.';
+    if (/NetworkError|network/i.test(m)) return 'Network problem. Check your connection and try again.';
+    return m.replace(/^Exception:\s*/, '') || 'Something went wrong. Please try again.';
+  }
+
+  /** Wrapper: every server call goes through here with a failure handler. */
+  function call(fn, args, onOk) {
+    busy(true);
+    google.script.run
+      .withSuccessHandler(function (res) { busy(false); onOk && onOk(res); })
+      .withFailureHandler(function (err) {
+        busy(false);
+        var m = (err && err.message) || '';
+        if (/SESSION_EXPIRED/.test(m)) { clearSession(); showView('login'); }
+        else if (/PASSWORD_CHANGE_REQUIRED/.test(m)) { showView('changepw'); }
+        toast(friendly(err));
+      })[fn].apply(null, args || []);
+  }
+
+  function clearSession() { state.token = null; state.user = null; sessionStorage.removeItem('bt_token'); }
+
+  function enter(user) {
+    state.user = user;
+    $('userName').textContent = user.name + ' (' + user.username + ')';
+    if (user.must_change_password) { showView('changepw'); return; }
+    $('roleBadge').textContent = user.role === 'admin' ? 'Admin' : 'User';
+    var sel = $('centerSelect'); sel.innerHTML = '';
+    if (user.role === 'admin' && user.centers.length > 1) sel.add(new Option('All centers', ''));
+    user.centers.forEach(function (c) { sel.add(new Option(c.center_code + ' — ' + c.name, c.center_id)); });
+    if (!user.centers.length) sel.add(new Option('No centers assigned', ''));
+    showView('dashboard');
+  }
+
+  $('loginForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var u = $('loginUser').value.trim().toLowerCase(), p = $('loginPass').value;
+    call('login', [u, p], function (res) {
+      $('loginPass').value = '';
+      state.token = res.token; sessionStorage.setItem('bt_token', res.token);
+      enter(res.user);
+    });
+  });
+
+  $('changePwForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    if ($('pwNew').value !== $('pwNew2').value) { toast('The new passwords do not match.'); return; }
+    call('changePassword', [state.token, $('pwOld').value, $('pwNew').value], function (user) {
+      ['pwOld', 'pwNew', 'pwNew2'].forEach(function (id) { $(id).value = ''; });
+      toast('Password updated.', true);
+      enter(user);
+    });
+  });
+
+  $('logoutBtn').addEventListener('click', function () {
+    var t = state.token; clearSession(); showView('login');
+    google.script.run.withFailureHandler(function () {}).logout(t);
+  });
+
+  // Startup: resume session if we have a token.
+  if (state.token) call('getSessionInfo', [state.token], enter);
+  else showView('login');
+</script>
