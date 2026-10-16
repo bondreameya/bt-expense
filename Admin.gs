@@ -35,8 +35,13 @@ function validCenterIds_(ids) {
 }
 
 /** Create a user; returns a one-time temporary password for the admin to pass on. */
-function adminCreateUser(token, u) {
+function adminCreateUser(token, u, requestId) {
   var sess = admin_(token);
+  // Note: the cached duplicate-result includes the one-time temp password (server-side cache only, 10 min).
+  return idempotent_(sess, 'user', requestId, function () { return adminCreateUser_(sess, u); });
+}
+
+function adminCreateUser_(sess, u) {
   var uname = normUsername_(u.username);
   var name = cleanStr_(u.name, 100); if (!name) throw new Error('Name is required.');
   var role = validRole_(u.role || 'user');
@@ -116,8 +121,12 @@ function cleanVendor_(v) {
 }
 
 /** Users may also add vendors (needed while entering expenses); only admins can edit them. */
-function createVendor(token, v) {
+function createVendor(token, v, requestId) {
   var sess = requireSession(token);
+  return idempotent_(sess, 'vendor', requestId, function () { return createVendor_(sess, v); });
+}
+
+function createVendor_(sess, v) {
   var o = cleanVendor_(v || {});
   return withLock_(function () {
     if (bq('SELECT 1 AS x FROM ' + T('vendors') + ' WHERE LOWER(name) = LOWER(@n) AND active', { n: o.name }).length)

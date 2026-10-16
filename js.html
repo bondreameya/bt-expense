@@ -5,7 +5,60 @@
 
   function esc(s) { return s === null || s === undefined ? '' : String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function money(n) { return n === null || n === undefined ? '' : '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-  function busy(on) { busy.n = (busy.n || 0) + (on ? 1 : -1); $('loading').classList.toggle('hidden', busy.n <= 0); }
+  /** Global activity: slim top progress bar at once, full overlay only if a call runs > 1.5 s. */
+  function busy(on) {
+    busy.n = Math.max(0, (busy.n || 0) + (on ? 1 : -1));
+    $('progress').classList.toggle('hidden', busy.n <= 0);
+    clearTimeout(busy._t);
+    if (busy.n > 0) busy._t = setTimeout(function () { if (busy.n > 0) $('loading').classList.remove('hidden'); }, 1500);
+    else $('loading').classList.add('hidden');
+  }
+
+  // ---------- button busy-locking (central) ----------
+  // The element that started the current user action is captured here (capture phase, before any handler),
+  // so api() can lock it without every call site having to pass it.
+  var Busy = { trigger: null };
+  document.addEventListener('click', function (e) {
+    var el = e.target.closest && e.target.closest('button, a');
+    if (el && el.classList.contains('is-busy')) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+    Busy.trigger = el || null;
+    setTimeout(function () { Busy.trigger = null; }, 0);
+  }, true);
+  document.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (form.getAttribute('data-busy') === '1') { e.preventDefault(); e.stopImmediatePropagation(); return; } // Enter-key double submit
+    Busy.trigger = e.submitter || form.querySelector('button[type=submit]') || null;
+    Busy.form = form;
+    setTimeout(function () { Busy.trigger = null; Busy.form = null; }, 0);
+  }, true);
+
+  /** Lock counter per element so chained calls (upload -> save) keep it locked until all finish. */
+  function lockBtn(el) {
+    if (!el) return;
+    el._locks = (el._locks || 0) + 1;
+    if (el._locks > 1) return;
+    el._label = el.innerHTML;
+    el.classList.add('is-busy');
+    if (el.tagName === 'BUTTON') el.disabled = true;
+    el.setAttribute('aria-busy', 'true');
+    el.innerHTML = '<span class="btn-spin"></span>' + el._label;
+    var f = el.form || el.closest('form'); if (f) { f.setAttribute('data-busy', '1'); el._formLocked = f; }
+  }
+  function unlockBtn(el) {
+    if (!el || !el._locks) return;
+    if (--el._locks > 0) return;
+    el.classList.remove('is-busy');
+    if (el.tagName === 'BUTTON') el.disabled = false;
+    el.removeAttribute('aria-busy');
+    if (el._label !== undefined) el.innerHTML = el._label;
+    if (el._formLocked) { el._formLocked.removeAttribute('data-busy'); el._formLocked = null; }
+  }
+  /** Current trigger, for handlers that go async (file read, confirm chains) before calling api(). */
+  function currentTrigger() { return Busy.trigger; }
+  function newRequestId() {
+    return (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+      : 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  }
   function toast(msg, ok) {
     var t = $('toast'); t.textContent = msg; t.className = 'toast' + (ok ? ' ok' : '');
     clearTimeout(toast._t); toast._t = setTimeout(function () { t.classList.add('hidden'); }, 7000);
@@ -23,12 +76,14 @@
   }
 
   /** Every server call goes through here: adds token, shows spinner, handles failures. */
-  function api(fn, args, onOk, onFail) {
+  function api(fn, args, onOk, onFail, opts) {
+    var btn = (opts && opts.button) || Busy.trigger;
+    lockBtn(btn);
     busy(true);
     google.script.run
-      .withSuccessHandler(function (res) { busy(false); if (onOk) onOk(res); })
+      .withSuccessHandler(function (res) { busy(false); unlockBtn(btn); if (onOk) onOk(res); })
       .withFailureHandler(function (err) {
-        busy(false);
+        busy(false); unlockBtn(btn);
         var m = (err && err.message) || '';
         console.error('Server call ' + fn + ' failed:', m);  // TEMP: surface real server errors
         if (/SESSION_EXPIRED/.test(m)) { clearSession(); showView('login'); }
@@ -39,9 +94,10 @@
   }
   /** For calls that take no token (login). */
   function apiNoAuth(fn, args, onOk) {
-    busy(true);
-    google.script.run.withSuccessHandler(function (r) { busy(false); onOk(r); })
-      .withFailureHandler(function (err) { busy(false); toast(friendly(err)); })[fn].apply(null, args);
+    var btn = Busy.trigger;
+    lockBtn(btn); busy(true);
+    google.script.run.withSuccessHandler(function (r) { busy(false); unlockBtn(btn); onOk(r); })
+      .withFailureHandler(function (err) { busy(false); unlockBtn(btn); toast(friendly(err)); })[fn].apply(null, args);
   }
 
   function showView(name) {
@@ -158,11 +214,11 @@
   $('dashMonth').addEventListener('change', loadDashboard);
 
   // ---------- file helpers ----------
-  function readFileBase64(file, cb) {
-    if (file.size > 10 * 1024 * 1024) { toast('File is larger than 10 MB.'); return; }
+  function readFileBase64(file, cb, onFail) {
+    if (file.size > 10 * 1024 * 1024) { toast('File is larger than 10 MB.'); if (onFail) onFail(); return; }
     var r = new FileReader();
     r.onload = function () { cb({ name: file.name, mimeType: file.type, base64: String(r.result).split(',')[1] }); };
-    r.onerror = function () { toast('Could not read that file.'); };
+    r.onerror = function () { toast('Could not read that file.'); if (onFail) onFail(); };
     r.readAsDataURL(file);
   }
   function openBase64(f) {

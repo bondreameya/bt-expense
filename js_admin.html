@@ -39,8 +39,8 @@
           api('adminApprovePending', [it.entity, it.id], function () { toast('Approved.', true); self.pending(); });
         }); });
         B.querySelectorAll('[data-reject]').forEach(function (b) { b.addEventListener('click', function () {
-          var it = items[+b.getAttribute('data-reject')], note = prompt('Note for rejecting (optional)'); if (note === null) return;
-          api('adminRejectPending', [it.entity, it.id, note], function () { toast('Rejected.', true); self.pending(); });
+          var it = items[+b.getAttribute('data-reject')], btn = currentTrigger(), note = prompt('Note for rejecting (optional)'); if (note === null) return;
+          api('adminRejectPending', [it.entity, it.id, note], function () { toast('Rejected.', true); self.pending(); }, null, { button: btn });
         }); });
         B.querySelectorAll('[data-pfile]').forEach(function (a) { a.addEventListener('click', function (e) {
           e.preventDefault(); var it = items[+a.getAttribute('data-pfile')]; api('getPendingAttachment', [it.entity, it.id], openBase64);
@@ -81,7 +81,8 @@
         '</div></div></form><div class="actions">' +
         (u ? '<button class="btn" id="uReset">Reset password</button>' + (u.locked ? '<button class="btn" id="uUnlock">Unlock</button>' : '') : '') +
         '<button class="btn" id="uCancel">Cancel</button><button class="btn btn-primary" id="uSave">Save</button></div><div id="uTemp"></div>');
-      var f = $('uForm');
+      var f = $('uForm'), reqId = newRequestId();
+      f.addEventListener('submit', function (e) { e.preventDefault(); if (!$('uSave').disabled) $('uSave').click(); });
       var data = function () {
         return { username: f.username.value, name: f.name.value, email: f.email.value, role: f.role.value, active: f.active ? f.active.checked : true,
                  center_ids: Array.prototype.filter.call(f.querySelectorAll('input[name=center]'), function (x) { return x.checked; }).map(function (x) { return x.value; }) };
@@ -93,11 +94,12 @@
       $('uCancel').addEventListener('click', closeModal);
       $('uSave').addEventListener('click', function () {
         if (u) api('adminUpdateUser', [u.user_id, data()], function () { closeModal(); toast('User updated. Changes apply at their next login.', true); self.users(); });
-        else api('adminCreateUser', [data()], function (r) { showTemp(r); $('uSave').disabled = true; toast('User created.', true); self.users(); });
+        else api('adminCreateUser', [data(), reqId], function (r) { showTemp(r); $('uSave').disabled = true; toast('User created.', true); self.users(); });
       });
       if (u) {
         $('uReset').addEventListener('click', function () {
-          if (confirm('Reset password for ' + u.username + '?')) api('resetPassword', [u.username], showTemp);
+          var btn = currentTrigger();
+          if (confirm('Reset password for ' + u.username + '?')) api('resetPassword', [u.username], showTemp, null, { button: btn });
         });
         if ($('uUnlock')) $('uUnlock').addEventListener('click', function () { api('adminUnlockUser', [u.user_id], function () { toast('Unlocked.', true); closeModal(); self.users(); }); });
       }
@@ -118,6 +120,7 @@
       var self = this;
       var F = [['name', 'Name *'], ['gstin', 'GSTIN'], ['pan', 'PAN'], ['phone', 'Phone'], ['email', 'Email'], ['upi_id', 'UPI ID'],
                ['bank_account_name', 'Bank account name'], ['bank_account_no', 'Bank account no.'], ['bank_ifsc', 'IFSC'], ['address', 'Address']];
+      var reqId = newRequestId();
       openModal('<h2>' + (v ? 'Edit vendor' : 'New vendor') + '</h2><form id="vForm" class="form-grid">' + F.map(function (x) {
         return '<label' + (x[0] === 'address' ? ' class="full"' : '') + '>' + x[1] + '<input name="' + x[0] + '" value="' + esc(v ? v[x[0]] : '') + '"></label>'; }).join('') +
         (v ? '<label class="full"><input type="checkbox" name="active" style="width:auto;display:inline"' + (v.active ? ' checked' : '') + '> Active</label>' : '') +
@@ -126,7 +129,7 @@
       $('vSave').addEventListener('click', function () {
         var f = $('vForm'), d = {}; F.forEach(function (x) { d[x[0]] = f[x[0]].value; }); if (f.active) d.active = f.active.checked;
         var done = function () { closeModal(); toast('Vendor saved.', true); self.vendors(); self.reloadBoot(); };
-        if (v) api('adminUpdateVendor', [v.vendor_id, d], done); else api('createVendor', [d], done);
+        if (v) api('adminUpdateVendor', [v.vendor_id, d], done); else api('createVendor', [d, reqId], done);
       });
     },
 

@@ -79,4 +79,12 @@
   .checks label { display: flex; gap: 8px; align-items: center; margin: 0; color: var(--text); }
   .checks input { width: auto; margin: 0; }
   .toast { position: sticky; top: 8px; z-index: 20; }
+  .btn-spin { display: inline-block; width: 13px; height: 13px; margin-right: 7px; vertical-align: -2px; border: 2px solid currentColor;
+              border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
+  .is-busy { cursor: progress !important; opacity: .75; } a.is-busy { pointer-events: none; }
+  .btn:disabled { cursor: not-allowed; }
+  .progress { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 50; overflow: hidden; background: var(--teal-light); }
+  .progress div { position: absolute; height: 100%; width: 35%; background: #14b8a6; animation: prog 1.1s ease-in-out infinite; }
+  @keyframes prog { 0% { left: -35%; } 100% { left: 100%; } }
+  .loading { background: rgba(255,255,255,.35); }
 </style>

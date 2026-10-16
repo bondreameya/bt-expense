@@ -94,6 +94,8 @@
       if (!state.boot.centers.length) { toast('No centers are assigned to you.'); return; }
       openModal(this.form(rec, centerId));
       var form = $('recForm');
+      form.setAttribute('data-req', newRequestId());   // idempotency key for this form
+      form.addEventListener('submit', function (e) { e.preventDefault(); var b = $('recSave'); if (b && !b.disabled) b.click(); });
       var fill = function () {
         var cid = form.__center.value, c = centerById(cid);
         form.querySelectorAll('select[data-vendor]').forEach(function (s) { vendorOptions(s, s.value || (rec ? rec[s.name] : '')); });
@@ -125,40 +127,43 @@
     },
     save: function (rec, form) {
       var self = this, data = this.collect(form), centerId = form.__center.value;
+      var btn = currentTrigger(); lockBtn(btn);           // stays locked across file upload + save
+      var o = { button: btn }, done = function () { unlockBtn(btn); };
       var go2 = function () {
-        if (!rec) return api('createRecord', [self.entity, centerId, data], function (r) { closeModal(); toast('Saved as ' + r.id + '.', true); self.load(); });
+        if (!rec) return api('createRecord', [self.entity, centerId, data, form.getAttribute('data-req')], function (r) {
+          done(); closeModal(); toast('Saved as ' + r.id + '.', true); self.load(); }, done, o);
         var changes = {};
         Object.keys(data).forEach(function (k) { if (String(data[k] || '') !== String(rec[k] === null || rec[k] === undefined ? '' : rec[k])) changes[k] = data[k]; });
-        if (!Object.keys(changes).length) { toast('Nothing changed.'); return; }
+        if (!Object.keys(changes).length) { done(); toast('Nothing changed.'); return; }
         var reason = form.__reason ? form.__reason.value : '';
-        if (!isAdmin() && !reason.trim()) { toast('Please give a reason for the change.'); return; }
+        if (!isAdmin() && !reason.trim()) { done(); toast('Please give a reason for the change.'); return; }
         api('updateRecord', [self.entity, rec.id, changes, reason], function (r) {
-          closeModal(); toast(r.applied ? 'Changes saved.' : 'Change sent to admin for approval.', true); self.load();
-        });
+          done(); closeModal(); toast(r.applied ? 'Changes saved.' : 'Change sent to admin for approval.', true); self.load();
+        }, done, o);
       };
       var fileInput = form.__file;
       if (fileInput && fileInput.files.length) {
         var dateVal = data[state.boot.meta[this.entity].dateCol] || state.boot.today;
         readFileBase64(fileInput.files[0], function (f) {
-          api('uploadAttachment', [centerId, dateVal, f], function (up) { data.file_id = up.file_id; go2(); });
-        });
+          api('uploadAttachment', [centerId, dateVal, f], function (up) { data.file_id = up.file_id; go2(); }, done, o);
+        }, done);
       } else go2();
     },
     remove: function (rec, form) {
-      var self = this, reason = '';
+      var self = this, reason = '', btn = currentTrigger();
       if (!isAdmin()) { reason = form.__reason ? form.__reason.value : ''; if (!reason.trim()) { toast('Please give a reason for deleting.'); return; } }
       if (!confirm(isAdmin() ? 'Delete ' + rec.id + '? It will be marked deleted and unlinked.' : 'Ask an admin to delete ' + rec.id + '?')) return;
-      api('deleteRecord', [this.entity, rec.id, reason], function (r) { closeModal(); toast(r.applied ? 'Deleted.' : 'Delete request sent for approval.', true); self.load(); });
+      api('deleteRecord', [this.entity, rec.id, reason], function (r) { closeModal(); toast(r.applied ? 'Deleted.' : 'Delete request sent for approval.', true); self.load(); }, null, { button: btn });
     },
     quickVendor: function (after) {
-      var name = prompt('New vendor name'); if (!name) return;
-      api('createVendor', [{ name: name }], function (v) {
+      var btn = currentTrigger(), name = prompt('New vendor name'); if (!name) return;
+      api('createVendor', [{ name: name }, newRequestId()], function (v) {
         state.boot.vendors.push({ vendor_id: v.vendor_id, name: v.name });
         state.boot.vendors.sort(function (a, b) { return a.name.localeCompare(b.name); });
         fillVendorSelects();
         var s = document.querySelector('#recForm select[data-vendor]'); if (s) { vendorOptions(s, v.vendor_id); }
         toast('Vendor added.', true);
-      });
+      }, null, { button: btn });
     }
   };
   $('fApply').addEventListener('click', function () { Records.page = 0; Records.load(); });
@@ -212,8 +217,9 @@
       $('rcDetail').querySelectorAll('[data-unlink]').forEach(function (b) {
         b.addEventListener('click', function () {
           var p = b.getAttribute('data-unlink').split('|');
+          var btn = currentTrigger();
           if (!confirm('Unlink ' + p[1] + '?')) return;
-          api('unlinkRecord', [p[0], x.id, p[1]], function () { toast('Unlinked.', true); self.pick(x.id); self.load(); });
+          api('unlinkRecord', [p[0], x.id, p[1]], function () { toast('Unlinked.', true); self.pick(x.id); self.load(); }, null, { button: btn });
         });
       });
       $('rcDetail').querySelectorAll('[data-link]').forEach(function (b) {

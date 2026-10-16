@@ -153,8 +153,12 @@ function getRecord(token, entity, id) {
   return { record: r, pending_edit: r.sys_remarks.pending_edit || null };
 }
 
-function createRecord(token, entity, centerId, data) {
+function createRecord(token, entity, centerId, data, requestId) {
   var sess = requireSession(token);
+  return idempotent_(sess, 'create_' + entity, requestId, function () { return createRecord_(sess, entity, centerId, data); });
+}
+
+function createRecord_(sess, entity, centerId, data) {
   var e = ent_(entity);
   assertCenter_(sess, centerId);
   var clean = cleanPayload_(e, data || {}, false);

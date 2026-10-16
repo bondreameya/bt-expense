@@ -78,3 +78,29 @@ function cleanStr_(v, max) {
   if (!v) return null;
   return v.slice(0, max || 500);
 }
+
+/**
+ * Idempotency guard for creates. Same user + same client request_id within 10 min returns the first result
+ * instead of creating a duplicate. A second call while the first is still running gets a friendly error.
+ */
+function idempotent_(sess, scope, requestId, fn) {
+  if (!requestId) return fn();
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(String(requestId))) throw new Error('Bad request id.');
+  var cache = CacheService.getScriptCache(), key = 'idem_' + scope + '_' + sess.user_id + '_' + requestId;
+  var claimed = withLock_(function () {
+    var v = cache.get(key);
+    if (v) return v;
+    cache.put(key, 'PENDING', 600);
+    return null;
+  });
+  if (claimed === 'PENDING') throw new Error('Already saving — please wait a moment.');
+  if (claimed) return JSON.parse(claimed);
+  try {
+    var res = fn();
+    cache.put(key, JSON.stringify(res), 600);
+    return res;
+  } catch (e) {
+    cache.remove(key);
+    throw e;
+  }
+}
